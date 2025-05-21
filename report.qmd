@@ -196,9 +196,9 @@ cat_df$Data$`MIS+OTB-S` %>%
 # 
 # 
 # pred_06 = lapply(modelos_gdm_06, function(x){x$pred})
-# CatDynSum(x=resultados_06,
-#           season=2006,
-#           method=gdm_log_06$methods) %>% View
+CatDynSum(x=resultados_06,
+          season=2006,
+          method=gdm_log_06$methods) %>% View
 
 
 # plotador(cat_df, fit_null, pre = F,
@@ -218,8 +218,8 @@ load('data/preliminar_catdyn_fits.Rdata')
 fit_null$fit$Model$CG$AIC
 
 res_06 = list()
-res_06$pred = pred_06[[11]]
-res_06$fit = resultados_06[[11]]
+res_06$pred = pred_06[[14]]
+res_06$fit = resultados_06[[14]]
 
 annual_biomass =
   CatDynBSD(res_06$fit,
@@ -228,7 +228,6 @@ annual_biomass =
             mbw.sd = predicos$se.fit) %>% 
   mutate(TimeStep = 216,
          x =seq(2006,2023+11/12,1/12)) 
-
 
 ```
 
@@ -251,8 +250,8 @@ results = res_06$pred$Model$Results %>%
   as.data.frame() %>% 
   mutate(x = 1:216)
 
-natural_mortality = res_06$fit$Model$BFGS$bt.par$M
-natural_mortality_sd = res_06$fit$Model$BFGS$bt.stdev[['M']]
+natural_mortality = res_06$fit$Model$spg$bt.par$M
+natural_mortality_sd = res_06$fit$Model$spg$bt.stdev[['M']]
 
 # Fishing Mortality
 results %>% 
@@ -424,18 +423,20 @@ Both allow non-linearity for $E_t$ and $N_t$;
 #| warning: false
 
 dat = list()
-
+# nmult = 1000000
 # DO NOT USE DATA FRAMES!
 # P_{t-1} = lagP
 
-dat$Ct = as.vector(df_effort$catch_otb/df_effort$res)  # catches
-dat$Et = as.vector(df_effort$effort_otb) # effort
+dat$Ct = as.vector(df_effort$catch_otb[as.numeric(as.character(df_effort$year_sale))>2005]/
+                     df_effort$res[as.numeric(as.character(df_effort$year_sale))>2005])  # catches
+dat$Et = as.vector(df_effort$effort_otb[as.numeric(as.character(df_effort$year_sale))>2005]) # effort
 
 indice_manual_2 = 
   list(
-    12,12,12,12, 
-    12,12,12,12,12,
-    12,10,10,11,12,
+    # 12,12,12,12, 
+    # 12,12,12,12,12,
+    # 12,10,
+    10,11,12,
     12,12,10,11,12,
     11,12,10,12,11,
     12,12,12,12,10)
@@ -451,15 +452,15 @@ par = list()
 par$Rt = as.vector(rep(20000,length(dat$u)))# init empty vector
 # par$meanBt = 100000
 
-par$logalpha = log(0.85)
-par$logbeta = log(0.85)
-par$logK = log(0.0001)
-par$logN0 = log(600000000)
-par$logM = log(0.01)
+par$logalpha = log(1)
+par$logbeta = log(1)
+par$logK = log(0.000001)
+par$logN0_scaled = log(0.1) # inserir nmult
+par$logM = log(0.00001)
 
 # par$B0 = 0.5*par$K # % of stock depletion at time zero
 
-par$logsdCt = 1
+par$logsdCt = 2
 # par$logsdB0 = 1000
 
 # initialize joint negative loglikelihood function
@@ -471,7 +472,8 @@ jnll = function(par){
   alpha = exp(logalpha)
   beta = exp(logbeta)
   K = exp(logK)
-  N0 = exp(logN0)
+  N0 = 1e9 * exp(logN0_scaled)
+  # N0 = exp(logN0)
   M = exp(logM)
   sdCt = exp(logsdCt)
   # Rt = exp(logRt)
@@ -496,12 +498,12 @@ jnll = function(par){
   ## From the process equation
   # Initial values
  
-  catch = c()
-  for(mes in seq_along(dat$Ct)){
-    
-    m = exp(-M/2)
-    
-    # core
+  catch = numeric(1)
+  m = exp(-M/2)
+  catch[1] = K*Et[1]^alpha * m *(N0*exp(-M*1))^beta
+  
+  for(mes in 2:length(dat$Ct)){
+       # core
     
     core = K*(Et[mes]^alpha) * m 
     
@@ -510,11 +512,19 @@ jnll = function(par){
     part1 = N0*exp(-M*mes)
     
     # catch aggregation
-     
-    part2 = 0
-    for(mes_ant in seq_len(length(dat$Ct)-1)){
-      part2 = part2 + Ct[mes_ant]*exp(-M*(mes-mes_ant-1))}
     
+    ## Using the observation series 
+    # part2 = 0
+    # for(mes_ant in seq_len(length(dat$Ct)-1)){
+    #   part2 = part2 + Ct[mes_ant]*exp(-M*(mes-mes_ant-1))}
+    
+    ## Using the expected catch recursively
+    part2 = 0
+      # if(mes != 1){
+    for(mes_ant in seq_len(length(catch))){
+    part2 = part2 + catch[mes_ant]*exp(-M*(mes-mes_ant-1))
+    }
+    # }
     # Recruitment pulses
     
     part3 = 0
@@ -523,11 +533,14 @@ jnll = function(par){
     
     
     # Assemble
-    pred = core * (part1 -m*part2 + part3)^beta
+    base = part1 - m * part2 + part3
+    pred = core * (base)^beta
     catch[mes] = pred
     
     jnll = jnll - dnorm(Ct[mes], pred, sdCt, log = T)
-  
+    
+    
+    
   }
   REPORT(catch)
   jnll
@@ -537,6 +550,10 @@ jnll = function(par){
 jnll(par)
 
 obj7 = MakeADFun(jnll, par, random = 'Rt')
+
+
+obj7$report()['catch']
+
 fit7 = nlminb(obj7$par, obj7$fn, obj7$gr)
 
 sdr7 = sdreport(obj7)
@@ -569,37 +586,80 @@ aic_value7 = 2 * k - 2 * logLik_value7
 log_lik7 = numeric(length(dat$Ct))
 
 # Vector of predicted means
-meanvec7 = c()
-  for(mes in seq_along(dat$Ct)){
-    
-    m = exp(-exp(pl7$logM)/2)
-    
-    # core
+meanvec7 = numeric(1)
+  m = exp(-exp(pl7$logM)/2)
+  
+  # catch[1] = K*Et[1]^alpha * m *(N0*exp(-M*1))^beta
+  meanvec7[1] = exp(pl7$logK)*
+    (dat$Et[1]^exp(pl7$logalpha)) *
+    m *(1e9*exp(pl7$logN0_scaled)) *
+    exp((-exp(pl7$logM)*1))^exp(pl7$logbeta)
+  
+  for(mes in 2:length(dat$Ct)){
+       # core
     
     core = exp(pl7$logK)*(dat$Et[mes]^exp(pl7$logalpha)) * m 
     
     # M-driven decay
     
-    part1 = exp(pl7$logN0)*exp(-exp(pl7$logM)*mes)
+    part1 = (1e9 * exp(pl7$logN0_scaled)) * exp(-exp(pl7$logM)*mes)
     
     # catch aggregation
-     
-    part2 = 0
-    for(mes_ant in seq_len(length(dat$Ct)-1)){
-      part2 = part2 + dat$Ct[mes_ant]*exp(-exp(pl7$logM)*(mes-mes_ant-1))}
     
+    ## Using the observation series 
+    # part2 = 0
+    # for(mes_ant in seq_len(length(dat$Ct)-1)){
+    #   part2 = part2 + Ct[mes_ant]*exp(-M*(mes-mes_ant-1))}
+    
+    ## Using the expected catch recursively
+    part2 = 0
+      # if(mes != 1){
+    for(mes_ant in seq_len(length(meanvec7))){
+    part2 = part2 + meanvec7[mes_ant]*
+      exp(-exp(pl7$logM)*(mes-mes_ant-1))
+    }
+    # }
     # Recruitment pulses
     
     part3 = 0
     for(j in seq_along(dat$u[dat$u<=mes])){
-      part3 = part3 + 
-        summary(sdr7, 'random')[,'Estimate'][j]*
-        exp(-exp(pl7$logM)*(mes-dat$u[j]))}
+      part3 = part3 + pl7$Rt[j]*exp(-exp(pl7$logM)*(mes-dat$u[j]))}
     
     
     # Assemble
-    pred = core * (part1 -m*part2 + part3)^exp(pl7$logbeta)
+    base = part1 - m * part2 + part3
+    pred = core * (base)^exp(pl7$logbeta)
     meanvec7[mes] = pred}
+  # for(mes in seq_along(dat$Ct)){
+  #   
+  #   m = exp(-exp(pl7$logM)/2)
+  #   
+  #   # core
+  #   
+  #   core = exp(pl7$logK)*(dat$Et[mes]^exp(pl7$logalpha)) * m 
+  #   
+  #   # M-driven decay
+  #   
+  #   part1 = exp(pl7$logN0)*exp(-exp(pl7$logM)*mes)
+  #   
+  #   # catch aggregation
+  #    
+  #   part2 = 0
+  #   for(mes_ant in seq_len(length(dat$Ct)-1)){
+  #     part2 = part2 + dat$Ct[mes_ant]*exp(-exp(pl7$logM)*(mes-mes_ant-1))}
+  #   
+  #   # Recruitment pulses
+  #   
+  #   part3 = 0
+  #   for(j in seq_along(dat$u[dat$u<=mes])){
+  #     part3 = part3 + 
+  #       summary(sdr7, 'random')[,'Estimate'][j]*
+  #       exp(-exp(pl7$logM)*(mes-dat$u[j]))}
+  #   
+  #   
+  #   # Assemble
+  #   pred = core * (part1 -m*part2 + part3)^exp(pl7$logbeta)
+  #   meanvec7[mes] = pred}
   
 # Revert transformation of sigma(y)  
 sdy = exp(pl7$logsdCt)
@@ -629,22 +689,40 @@ xtable(data.frame(Model = c('GMD'),
 Convergence was problematic, but we did achieve plausible estimates. $M$ and $N0$ did not yield standard error estimates, and we have some negative values for $R_j$, which should not be possible. We have explicitly excluded the scenario of exit pulses, but if we attempt to bound $R_j$ to positive values the model convergence completely falls apart. Perhaps that premise should be reevaluated?
 
 ```{r}
+# plot referencia catdyn
+# 
+results %>% 
+  ggplot() + 
+  geom_line(aes(x =Period.month, 
+                y = Observed.Catch.kg),
+            col = 'black') + 
+    geom_line(aes(x =Period.month, 
+                y = Predicted.Catch.kg),
+            col = 'red', linetype =2) + 
+  geom_line(aes(x =Period.month, 
+                y = dat$Ct),
+            col = 'green', linetype =2) + 
+  theme_bw()
+```
+
+
+```{r}
 #| echo: false
 
 set.seed(1)
-pred7 = rnorm(348,
+pred7 = rnorm(216,
               meanvec7,
               sdy)
 
 ggplot() + 
-  geom_point(aes(x = 1:348,
+  geom_point(aes(x = 1:216,
                 y = dat$Ct)) +
-   geom_line(aes(x = 1:348,
+   geom_line(aes(x = 1:216,
                 y = pred7),
             color = 'green') + 
-  geom_line(aes(x = 1:348,
+  geom_line(aes(x = 1:216,
                 y = obj7$report()['catch'] %>% unlist()),
-            color = 'red') + 
+            color = 'red') +
   theme_bw()
 ```
 
@@ -662,44 +740,26 @@ Bayesian, parametric, $p$-value, ICES
 
 \section{Primary Subhead\label{intro}}
 
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-Please consider publishing your presentation in the ICES VI Proceedings. You are eligible to publish if you orally presented your paper in an invited, topic-contributed, or contributed session. Discussants and IOL and plenary session presenters may submit a paper for the proceedings, as well. If your paper was withdrawn or not orally presented, it is not eligible for publication in the proceedings.
-
-Authors retain copyright to their individual paper published in the proceedings. Eligible presenters are not prohibited from publishing in the proceedings as well as other publications; authors are advised to consult journal exclusivity agreements for restrictions.
-
-The page limit is 15 pages. This includes keynote addresses, introductory overview lecture papers, invited papers, contributed/topic-contributed papers, discussant papers, end panelist papers, and summary of end panel discussion.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. 
+This is sample text and needs to be completely replaced before submitting your paper.
 
 \subsection{References}
 
-References within your paper should use the Harvard referencing format. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. 
+References within your paper should use the Harvard referencing format. This is sample text and needs to be completely replaced before submitting your paper. 
 
 \subsection{Secondary Subhead}
 
 
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. 
+This is sample text and needs to be completely replaced before submitting your paper.   
 
 \section{Another Primary Subhead}
 
 \subsection{Secondary Subhead}
 
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. 
+This is sample text and needs to be completely replaced before submitting your paper. 
 
 \subsubsection{Tertiary Subhead}
 
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. 
+This is sample text and needs to be completely replaced before submitting your paper. 
 
 \begin{table}
 \caption{Genotypes and Their Genotypic Values for a Diallelic Locus Genotypes and Their Genotypic Values for a Diallelic Locus Genotypes and Their Genotypic Values for a Diallelic Locus Genotypes and Their Genotypic Values for a Diallelic Locus Genotypes and Their Genotypic Values for a Diallelic Locus }
@@ -725,29 +785,11 @@ QQ&     3&      $\mu$&  0&      0\\
 \end{center}
 \end{table}
 
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. 
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
+This is sample text and needs to be completely replaced before submitting your paper. 
 
 \begin{figure}[t]
 \centering\includegraphics[scale=.75]{fig1.eps}
 \caption{Place figure caption here.}
 \end{figure}
 
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. 
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. 
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
-
-This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper. This is sample text and needs to be completely replaced before submitting your paper.
+This is sample text and needs to be completely replaced before submitting your paper. 
