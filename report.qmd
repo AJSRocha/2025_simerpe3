@@ -425,13 +425,17 @@ Both allow non-linearity for $E_t$ and $N_t$;
 #| warning: false
 
 dat = list()
-# nmult = 1000000
-# DO NOT USE DATA FRAMES!
-# P_{t-1} = lagP
 
-dat$Ct = as.vector(df_effort$catch_otb[as.numeric(as.character(df_effort$year_sale))>2005]/
-                     df_effort$res[as.numeric(as.character(df_effort$year_sale))>2005])  # catches
-dat$Et = as.vector(df_effort$effort_otb[as.numeric(as.character(df_effort$year_sale))>2005]) # effort
+dat$Ct = as.vector(df_effort$catch_otb[as.numeric(
+  as.character(
+    df_effort$year_sale))>2005]/
+                     df_effort$res[as.numeric(
+                       as.character(
+                         df_effort$year_sale))>2005])  # catches
+
+dat$Et = as.vector(df_effort$effort_otb[as.numeric(
+  as.character(
+    df_effort$year_sale))>2005]) # effort
 
 indice_manual_2 = 
   list(
@@ -440,32 +444,44 @@ indice_manual_2 =
     11,12,10,12,11,
     12,12,12,12,10)
 
+indice_manual_v = 
+  list(
+    7,7,7,
+    7,7,7,7,7,
+    7,7,7,7,7,
+    7,7,7,7,7)
+
 for(i in 0:(length(indice_manual_2)-1)){
   indice_manual_2[[i+1]] = 12*i + indice_manual_2[[i+1]]
 }
 
+for(i in 0:(length(indice_manual_v)-1)){
+  indice_manual_v[[i+1]] = 12*i + indice_manual_v[[i+1]]
+}
 dat$u = unlist(indice_manual_2) # recruitment pulse timings
+dat$v = unlist(indice_manual_v)
 
 # initialize parameter list with initial estimates
 par = list()
 
-par$Rt = as.vector(rep(20000,length(dat$u)))# init empty vector
+# par$Rt_scaled = as.vector(rep(20,
+#                               length(dat$u)))# init empty vector
 
-# par$Rt_scaled = c(57.744,40.315,3.534,21.558,2.766,
-#                      9.735,55.453,3.438,16.525,10.746,
-#                      14.552,2.524,22.789,12.567,34.463,
-#                      15.000,15.000,15.000)
+par$Rt_scaled = c(57.744,40.315,3.534,21.558,2.766,
+                     9.735,55.453,3.438,16.525,10.746,
+                     14.552,2.524,22.789,12.567,34.463,
+                     15.000,15.000,15.000)
 
-par$logalpha = log(0.6)
-par$logbeta = log(0.6)
-par$logK = log(0.0001)
-par$logN0_scaled = log(600000000) # inserir nmult
-par$logM = log(0.01)
+par$Ft_scaled = as.vector(rep(2,
+                              length(dat$u)))# init empty vector
 
-# par$B0 = 0.5*par$K # % of stock depletion at time zero
+par$logalpha = log(.5)
+par$logbeta = log(.5)
+par$logK = log(0.001)
+par$logN0_scaled = log(6000000) # inserir nmult
+par$logM = log(0.001)
 
-par$logsdCt = 2
-# par$logsdB0 = 1000
+par$logsdCt = 20
 
 # initialize joint negative loglikelihood function
 jnll = function(par){
@@ -476,30 +492,16 @@ jnll = function(par){
   alpha = exp(logalpha)
   beta = exp(logbeta)
   K = exp(logK)
-  N0 = exp(logN0_scaled)
+  N0 = 1e6 * exp(logN0_scaled)
   # N0 = exp(logN0)
   M = exp(logM)
   sdCt = exp(logsdCt)
-  # Rt = 1 * Rt_scaled
-  
-  
-  # sdB0 = exp(logsdB0)
+  Rt = 1e6 * Rt_scaled
+  Ft = 1e6 * Ft_scaled
   
   # assemble model    
   jnll = 0 # init jnll
  
-  ## Prior distributions
-  ## The 1 in the mean fixes the prior distribution of r
-  # jnll = jnll - dexp(r,1, log = TRUE)
-  # jnll = jnll - dexp(q,0.1, log = TRUE)
-  # jnll = jnll - dnorm(K, 1000000, 1000, log = TRUE)
-  
-  # prior on N0
-  # jnll = jnll - dnorm(Bt[1], K/2, 1000, log = TRUE)
-  
-  ## From the observation equation
- 
-  ## From the process equation
   # Initial values
  
   catch = advector(rep(0, length(dat$Ct)))
@@ -538,9 +540,13 @@ jnll = function(par){
     for(j in seq_along(u[u<=mes])){
       part3 = part3 + Rt[j]*exp(-M*(mes-u[j]))}
     
+    part4 = 0
+    for(j in seq_along(v[v<=mes])){
+      part4 = part4 + Ft[j]*exp(-M*(mes-v[j]))}
+    
     
     # Assemble
-    pred = core * (part1 - m * part2 + part3)^beta}
+    pred = core * (part1 - m * part2 + part3 - part4)^beta}
     
     catch[mes] = advector(pred)
     
@@ -554,7 +560,7 @@ jnll = function(par){
 # quick test: do we get a number? This number should be a likelihood.
 jnll(par)
 
-obj7 = MakeADFun(jnll, par, random = 'Rt')
+obj7 = MakeADFun(jnll, par, random = c('Rt_scaled', 'Ft_scaled'))
 
 
 obj7$report()['catch']
