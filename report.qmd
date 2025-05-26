@@ -418,6 +418,8 @@ Both allow non-linearity for $E_t$ and $N_t$;
 
 ## Model 3.1: GDM, as seen on CatDyn
 
+
+
 ```{r}
 #| results: hide
 #| warning: false
@@ -433,9 +435,6 @@ dat$Et = as.vector(df_effort$effort_otb[as.numeric(as.character(df_effort$year_s
 
 indice_manual_2 = 
   list(
-    # 12,12,12,12, 
-    # 12,12,12,12,12,
-    # 12,10,
     10,11,12,
     12,12,10,11,12,
     11,12,10,12,11,
@@ -449,14 +448,19 @@ dat$u = unlist(indice_manual_2) # recruitment pulse timings
 
 # initialize parameter list with initial estimates
 par = list()
-par$Rt = as.vector(rep(20000,length(dat$u)))# init empty vector
-# par$meanBt = 100000
 
-par$logalpha = log(1)
-par$logbeta = log(1)
-par$logK = log(0.000001)
-par$logN0_scaled = log(0.1) # inserir nmult
-par$logM = log(0.00001)
+par$Rt = as.vector(rep(20000,length(dat$u)))# init empty vector
+
+# par$Rt_scaled = c(57.744,40.315,3.534,21.558,2.766,
+#                      9.735,55.453,3.438,16.525,10.746,
+#                      14.552,2.524,22.789,12.567,34.463,
+#                      15.000,15.000,15.000)
+
+par$logalpha = log(0.6)
+par$logbeta = log(0.6)
+par$logK = log(0.0001)
+par$logN0_scaled = log(600000000) # inserir nmult
+par$logM = log(0.01)
 
 # par$B0 = 0.5*par$K # % of stock depletion at time zero
 
@@ -472,11 +476,11 @@ jnll = function(par){
   alpha = exp(logalpha)
   beta = exp(logbeta)
   K = exp(logK)
-  N0 = 1e9 * exp(logN0_scaled)
+  N0 = exp(logN0_scaled)
   # N0 = exp(logN0)
   M = exp(logM)
   sdCt = exp(logsdCt)
-  # Rt = exp(logRt)
+  # Rt = 1 * Rt_scaled
   
   
   # sdB0 = exp(logsdB0)
@@ -498,12 +502,15 @@ jnll = function(par){
   ## From the process equation
   # Initial values
  
-  catch = numeric(1)
-  m = exp(-M/2)
-  catch[1] = K*Et[1]^alpha * m *(N0*exp(-M*1))^beta
+  catch = advector(rep(0, length(dat$Ct)))
   
-  for(mes in 2:length(dat$Ct)){
+    for(mes in 1:length(dat$Ct)){
        # core
+    m = exp(-M/2)
+    
+    if(mes == 1){
+      pred = K*Et[mes]^alpha * m * (N0*exp(-M*1))^beta
+    }else{
     
     core = K*(Et[mes]^alpha) * m 
     
@@ -521,9 +528,9 @@ jnll = function(par){
     ## Using the expected catch recursively
     part2 = 0
       # if(mes != 1){
-    for(mes_ant in seq_len(length(catch))){
-    part2 = part2 + catch[mes_ant]*exp(-M*(mes-mes_ant-1))
-    }
+    for(mes_ant in 1:(mes-1)){
+    part2 = part2 + catch[mes_ant]*exp(-M*(mes-mes_ant-1))}
+
     # }
     # Recruitment pulses
     
@@ -533,14 +540,12 @@ jnll = function(par){
     
     
     # Assemble
-    base = part1 - m * part2 + part3
-    pred = core * (base)^beta
-    catch[mes] = pred
+    pred = core * (part1 - m * part2 + part3)^beta}
+    
+    catch[mes] = advector(pred)
     
     jnll = jnll - dnorm(Ct[mes], pred, sdCt, log = T)
-    
-    
-    
+   
   }
   REPORT(catch)
   jnll
