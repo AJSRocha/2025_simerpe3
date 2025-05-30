@@ -79,9 +79,9 @@ cat_df = as.CatDynData(x=df_effort %>%
                          filter(as.numeric(
                            as.character(year_sale)) %in% c(2006:2023)),
                        step="month",
-                       fleet.name="MIS+OTB-S",
-                       coleff=6,
-                       colcat=5,
+                       fleet.name="MIS-S",
+                       coleff=4,
+                       colcat=3,
                        colmbw=9,
                        unitseff="trips",
                        unitscat="kg",
@@ -98,60 +98,58 @@ cat_df = as.CatDynData(x=df_effort %>%
 
 indice_manual = 
   list(
-    # 12,12,12,12,12,
-    # 12,10,
     10,11,12,
     12,12,10,11,12,
-    11,12,10,12,11,
-    12,12,12,12,10)
+    11,10,12,7,10,
+    12,11,12,12,10)
 
 for(i in 0:(length(indice_manual)-1)){
   indice_manual[[i+1]] = 12*i + indice_manual[[i+1]]
 }
 
-unlist(indice_manual)
-
-cat_df$Data$`MIS+OTB-S` %>% 
-  mutate(year = ((time.step -1) %/% 12),
-         x2 = rep(1:12,length(year)/12)) %>% 
-  ggplot() + 
-  geom_line(aes(color = factor(year)),
-            linewidth = 1) + 
-  aes(y = spikecat,
-      x = x2) + 
-  facet_wrap(year ~.) + 
-  scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(
-    length(cat_df$Data$`MIS+OTB-S`$time.step)/12)) + 
-  theme_bw() + 
-  theme(legend.position = 'none')
-
-
-# first trial
+# unlist(indice_manual)
+# 
+# cat_df$Data$`MIS-S` %>% 
+#   mutate(year = ((time.step -1) %/% 12),
+#          x2 = rep(1:12,length(year)/12)) %>% 
+#   ggplot() + 
+#   geom_line(aes(color = factor(year)),
+#             linewidth = 1) + 
+#   aes(y = spikecat,
+#       x = x2) + 
+#   facet_wrap(year ~.) + 
+#   scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(
+#     length(cat_df$Data$`MIS-S`$time.step)/12)) + 
+#   theme_bw() + 
+#   theme(legend.position = 'none')
+# 
+# 
+# #first trial
 # a = Sys.time()
 # fit_null =
 #   trialer(cat_df,
-#           p = 18,
-#           M = 0.01,
-#           N0.ini = 60000, #millions, as in nmult
-#           P = indice_manual,
-#           P.ini  = list(
-#             # 20000,20000,20000,40000,20000,
-#             # 20000,20000,
-#             20000, 100000,20000,            #
-#             20000, 20000, 20000, 50000,20000,       
-#             20000, 20000, 20000, 20000, 20000,
-#             20000, 20000,40000,20000,20000), #2 elementos porque sao 2 perturbacaoes
-#           k.ini = 0.00005,
-#           alpha.ini = 0.85,
-#           beta.ini  = 0.85,
-#           distr = 'aplnormal',
-#           method = 'CG',
-#           itnmax = 10000,
-#           disp = list(100))
+#            p = 18,
+#                 M = 0.05976,
+#                 N0.ini = 14020, 
+#                 P = indice_manual,
+#                 P.ini  = list(
+#                 5744,40315,3534,
+#                 21558,2766,9735,
+#                 55453,3438,16525,
+#                 10746,14552,2524,
+#                 22789,12567,34463,
+#                 20000,20000,20000),
+#                 k.ini = 0.00003546,
+#                 alpha.ini = 1.1455,
+#                 beta.ini  = 0.6134,
+#                 distr = i,
+#                 method = j,
+#                 itnmax = 10000,
+#                 disp = list(100))
 # b = Sys.time()
 # b-a
-# 
-# # all fits
+# # 
+# # # all fits
 # a = Sys.time()
 # distribuicoes = c("gamma", "lognormal","normal","negbin","aplnormal", "apnormal")
 # optimizadores = c('CG', 'spg', 'BFGS', 'Nelder-Mead')
@@ -161,27 +159,27 @@ cat_df$Data$`MIS+OTB-S` %>%
 # for(i in distribuicoes){
 #   for(j in optimizadores){
 #     tryCatch({
-#       modelos_gdm_06[[length(modelos_gdm_06)+1]] = 
+#       modelos_gdm_06[[length(modelos_gdm_06)+1]] =
 #         trialer(cat_df,
 #                 p = 18,
-#                 M = 0.01,
-#                 N0.ini = 60000, #millions, as in nmult
+#                 M = 0.05976,
+#                 N0.ini = 14020, 
 #                 P = indice_manual,
 #                 P.ini  = list(
-#                   # 20000,20000,20000,40000,20000,
-#                   # 20000,20000,
-#                   20000, 100000,20000,            #
-#                   20000, 20000, 20000, 50000,20000,       
-#                   20000, 20000, 20000, 20000, 20000,
-#                   20000, 20000,40000,20000,20000), #2 elementos porque sao 2 perturbacaoes
-#                 k.ini = 0.00005,
-#                 alpha.ini = 0.85,
-#                 beta.ini  = 0.85,
+#                 5744,40315,3534,
+#                 21558,2766,9735,
+#                 55453,3438,16525,
+#                 10746,14552,2524,
+#                 22789,12567,34463,
+#                 20000,20000,20000),
+#                 k.ini = 0.00003546,
+#                 alpha.ini = 1.1455,
+#                 beta.ini  = 0.6134,
 #                 distr = i,
 #                 method = j,
 #                 itnmax = 10000,
 #                 disp = list(100))
-#       
+# 
 #       gdm_log_06[nrow(gdm_log_06)+1,1] = i
 #       gdm_log_06[nrow(gdm_log_06),2] = j
 #     },
@@ -196,9 +194,9 @@ cat_df$Data$`MIS+OTB-S` %>%
 # 
 # 
 # pred_06 = lapply(modelos_gdm_06, function(x){x$pred})
-CatDynSum(x=resultados_06,
-          season=2006,
-          method=gdm_log_06$methods) %>% View
+# CatDynSum(x=resultados_06,
+#           season=2006,
+#           method=gdm_log_06$methods) %>% View
 
 
 # plotador(cat_df, fit_null, pre = F,
@@ -206,7 +204,7 @@ CatDynSum(x=resultados_06,
 #          post2 = T)
 # save(fit_null,
 #      resultados_06,
-#      pred_06, 
+#      pred_06,
 #      gdm_log_06,
 #      file = 'data/preliminar_catdyn_fits.Rdata')
 
@@ -215,11 +213,27 @@ load('data/preliminar_catdyn_fits.Rdata')
 #          post1 = T,
 #          post2 = T)
 
-fit_null$fit$Model$CG$AIC
+
+# exclude failures
+tabela = 
+CatDynSum(x=resultados_06,
+          season=2006,
+          method=gdm_log_06$methods) %>% 
+  mutate(across(everything(),
+                function(x){
+    as.vector(unlist(x))}))
+
+modelos_completos = 
+tabela %>% 
+  mutate(indice = 1:nrow(tabela)) %>% 
+  filter(!if_any(everything(), is.nan)) %>% select(indice)
+
+# 12
+tabela[12,]
 
 res_06 = list()
-res_06$pred = pred_06[[14]]
-res_06$fit = resultados_06[[14]]
+res_06$pred = pred_06[[modelos_completos$indice]]
+res_06$fit = resultados_06[[modelos_completos$indice]]
 
 annual_biomass =
   CatDynBSD(res_06$fit,
@@ -250,8 +264,8 @@ results = res_06$pred$Model$Results %>%
   as.data.frame() %>% 
   mutate(x = 1:216)
 
-natural_mortality = res_06$fit$Model$spg$bt.par$M
-natural_mortality_sd = res_06$fit$Model$spg$bt.stdev[['M']]
+natural_mortality = res_06$fit$Model$CG$bt.par$M
+natural_mortality_sd = res_06$fit$Model$CG$bt.stdev[['M']]
 
 # Fishing Mortality
 results %>% 
