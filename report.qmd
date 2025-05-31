@@ -79,16 +79,15 @@ cat_df = as.CatDynData(x=df_effort %>%
                          filter(as.numeric(
                            as.character(year_sale)) %in% c(2006:2023)),
                        step="month",
-                       fleet.name="MIS-S",
-                       coleff=4,
-                       colcat=3,
+                       fleet.name="MIS+OTB-S",
+                       coleff=6,
+                       colcat=5,
                        colmbw=9,
                        unitseff="trips",
                        unitscat="kg",
                        unitsmbw="kg",
                        nmult="thou",
                        season.dates=c(as.Date("2006-01-01"),
-                                      # as.Date("1995-12-24")))
                                       last_date_of_week(2023, 52)-1))
 
 # plot.CatDynData(cat_df,
@@ -109,104 +108,104 @@ for(i in 0:(length(indice_manual)-1)){
 
 # unlist(indice_manual)
 # 
-# cat_df$Data$`MIS-S` %>% 
-#   mutate(year = ((time.step -1) %/% 12),
-#          x2 = rep(1:12,length(year)/12)) %>% 
-#   ggplot() + 
-#   geom_line(aes(color = factor(year)),
-#             linewidth = 1) + 
-#   aes(y = spikecat,
-#       x = x2) + 
-#   facet_wrap(year ~.) + 
-#   scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(
-#     length(cat_df$Data$`MIS-S`$time.step)/12)) + 
-#   theme_bw() + 
-#   theme(legend.position = 'none')
+cat_df$Data$`MIS+OTB-S` %>%
+  mutate(year = ((time.step -1) %/% 12),
+         x2 = rep(1:12,length(year)/12)) %>%
+  ggplot() +
+  geom_line(aes(color = factor(year)),
+            linewidth = 1) +
+  aes(y = spikecat,
+      x = x2) +
+  facet_wrap(year ~.) +
+  scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(
+    length(cat_df$Data$`MIS+OTB-S`$time.step)/12)) +
+  theme_bw() +
+  theme(legend.position = 'none')
 # 
 # 
-# #first trial
-# a = Sys.time()
-# fit_null =
-#   trialer(cat_df,
-#            p = 18,
-#                 M = 0.05976,
-#                 N0.ini = 14020, 
-#                 P = indice_manual,
-#                 P.ini  = list(
-#                 5744,40315,3534,
-#                 21558,2766,9735,
-#                 55453,3438,16525,
-#                 10746,14552,2524,
-#                 22789,12567,34463,
-#                 20000,20000,20000),
-#                 k.ini = 0.00003546,
-#                 alpha.ini = 1.1455,
-#                 beta.ini  = 0.6134,
-#                 distr = i,
-#                 method = j,
-#                 itnmax = 10000,
-#                 disp = list(100))
-# b = Sys.time()
-# b-a
-# # 
-# # # all fits
-# a = Sys.time()
-# distribuicoes = c("gamma", "lognormal","normal","negbin","aplnormal", "apnormal")
-# optimizadores = c('CG', 'spg', 'BFGS', 'Nelder-Mead')
-# gdm_log_06 = data_frame(distr = character(),
-#                         methods = character())
-# modelos_gdm_06 = list()
-# for(i in distribuicoes){
-#   for(j in optimizadores){
-#     tryCatch({
-#       modelos_gdm_06[[length(modelos_gdm_06)+1]] =
-#         trialer(cat_df,
-#                 p = 18,
-#                 M = 0.05976,
-#                 N0.ini = 14020, 
-#                 P = indice_manual,
-#                 P.ini  = list(
-#                 5744,40315,3534,
-#                 21558,2766,9735,
-#                 55453,3438,16525,
-#                 10746,14552,2524,
-#                 22789,12567,34463,
-#                 20000,20000,20000),
-#                 k.ini = 0.00003546,
-#                 alpha.ini = 1.1455,
-#                 beta.ini  = 0.6134,
-#                 distr = i,
-#                 method = j,
-#                 itnmax = 10000,
-#                 disp = list(100))
-# 
-#       gdm_log_06[nrow(gdm_log_06)+1,1] = i
-#       gdm_log_06[nrow(gdm_log_06),2] = j
-#     },
-#     error=function(e){print(paste(i,j))
-#     })
-#   }
-# }
-# b = Sys.time()
-# b-a
-# 
-# resultados_06 = lapply(modelos_gdm_06, function(x){x$fit})
-# 
-# 
-# pred_06 = lapply(modelos_gdm_06, function(x){x$pred})
-# CatDynSum(x=resultados_06,
-#           season=2006,
-#           method=gdm_log_06$methods) %>% View
+#first trial
+a = Sys.time()
+fit_null =
+  trialer(cat_df,
+           p = 18,
+                M = 0.05976,
+                N0.ini = 14020,
+                P = indice_manual,
+                P.ini  = list(
+                5744,40315,3534,
+                21558,2766,9735,
+                55453,3438,16525,
+                10746,14552,2524,
+                22789,12567,34463,
+                20000,20000,20000),
+                k.ini = 0.00003546,
+                alpha.ini = 1.1455,
+                beta.ini  = 0.6134,
+                distr = i,
+                method = j,
+                itnmax = 10000,
+                disp = list(100))
+b = Sys.time()
+b-a
+#
+# # all fits
+a = Sys.time()
+distribuicoes = c("gamma", "lognormal","normal","negbin","aplnormal", "apnormal")
+optimizadores = c('CG', 'spg', 'BFGS', 'Nelder-Mead')
+gdm_log_06 = data_frame(distr = character(),
+                        methods = character())
+modelos_gdm_06 = list()
+for(i in distribuicoes){
+  for(j in optimizadores){
+    tryCatch({
+      modelos_gdm_06[[length(modelos_gdm_06)+1]] =
+        trialer(cat_df,
+                p = 18,
+                M = 0.05976,
+                N0.ini = 14020,
+                P = indice_manual,
+                P.ini  = list(
+                5744,40315,3534,
+                21558,2766,9735,
+                55453,3438,16525,
+                10746,14552,2524,
+                22789,12567,34463,
+                20000,20000,20000),
+                k.ini = 0.00003546,
+                alpha.ini = 1.1455,
+                beta.ini  = 0.6134,
+                distr = i,
+                method = j,
+                itnmax = 10000,
+                disp = list(100))
+
+      gdm_log_06[nrow(gdm_log_06)+1,1] = i
+      gdm_log_06[nrow(gdm_log_06),2] = j
+    },
+    error=function(e){print(paste(i,j))
+    })
+  }
+}
+b = Sys.time()
+b-a
+
+resultados_06 = lapply(modelos_gdm_06, function(x){x$fit})
+
+
+pred_06 = lapply(modelos_gdm_06, function(x){x$pred})
+CatDynSum(x=resultados_06,
+          season=2006,
+          method=gdm_log_06$methods) %>% View
 
 
 # plotador(cat_df, fit_null, pre = F,
 #          post1 = T,
 #          post2 = T)
-# save(fit_null,
-#      resultados_06,
-#      pred_06,
-#      gdm_log_06,
-#      file = 'data/preliminar_catdyn_fits.Rdata')
+save(fit_null,
+     resultados_06,
+     pred_06,
+     gdm_log_06,
+     file = 'data/preliminar_catdyn_fits.Rdata')
 
 load('data/preliminar_catdyn_fits.Rdata')
 # plotador(cat_df, fit_null, pre = F,
@@ -264,8 +263,8 @@ results = res_06$pred$Model$Results %>%
   as.data.frame() %>% 
   mutate(x = 1:216)
 
-natural_mortality = res_06$fit$Model$CG$bt.par$M
-natural_mortality_sd = res_06$fit$Model$CG$bt.stdev[['M']]
+natural_mortality = res_06$fit$Model$spg$bt.par$M
+natural_mortality_sd = res_06$fit$Model$spg$bt.stdev[['M']]
 
 # Fishing Mortality
 results %>% 
@@ -307,11 +306,12 @@ results %>%
                 y = `Predicted.Explotrate`),
             col = 'darkred',
             size = 1,
-            linetype = 2) +
-  geom_line(aes(x = Period.month,
-                y = `Observed.F.1/month`/(`Observed.F.1/month`+ natural_mortality)),
-            col = 'purple',
-            size = 1) +
+            linetype = 2) + 
+  geom_hline(yintercept = 0.4) + 
+  # geom_line(aes(x = Period.month,
+  #               y = `Observed.F.1/month`/(`Observed.F.1/month`+ natural_mortality)),
+  #           col = 'purple',
+  #           size = 1) +
   # geom_hline(yintercept = 0.4,
   #            col = 'darkgreen',
   #            size = 1,
@@ -763,11 +763,22 @@ Bayesian, parametric, $p$-value, ICES
 
 
 
-\section{Primary Subhead\label{intro}}
+\section{Introduction\label{intro}}
 
 This is sample text and needs to be completely replaced before submitting your paper.
 
-\subsection{References}
+\section{Methodology}
+
+\subsection{CatDyn}
+
+The fishery was assessed with *MAGD* in a previous work. In the current work, the same premises were adopted.
+
+* Purse seine landings were discarded, for being too small
+* Landings and effort from the polyvalent and bottom trawl fleets were included since no significant differences between their catch and effort relationship were observed. In this fashion, captures from near shore and coast fisheries were accounted for.
+* Models were checked for gradient in parameter larger than 1
+
+
+\section{References}
 
 References within your paper should use the Harvard referencing format. This is sample text and needs to be completely replaced before submitting your paper. 
 
