@@ -2,8 +2,9 @@
 library(CatDyn)
 library(tidyverse)
 
-load("data/df_effort_m_mbw_otb.Rdata")
-load('data/mbw_model.Rdata')
+load("df_effort_m_mbw_otb.Rdata")
+load('mbw_model.Rdata')
+source('funcoes_catdyn.R')
 
 
 mod_aux = lm(df_effort$catch ~ df_effort$effort)
@@ -102,15 +103,15 @@ fit_null_bill =
   trialer(cat_df_bill,
           p = 18,
           M = 0.05976,
-          N0.ini = 14020,
+          N0.ini = 14.020,
           P = indice_manual,
           P.ini  = list(
-            5744,40315,3534,
-            21558,2766,9735,
-            55453,3438,16525,
-            10746,14552,2524,
-            22789,12567,34463,
-            20000,20000,20000),
+            5.744,40.315,3.534,
+            21.558,2.766,9.735,
+            55.453,3.438,16.525,
+            10.746,14.552,2.524,
+            22.789,12.567,34.463,
+            20.000,20.000,20.000),
           k.ini = 0.00003546,
           alpha.ini = 1.1455,
           beta.ini  = 0.6134,

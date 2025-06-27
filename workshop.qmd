@@ -1,0 +1,181 @@
+---
+title: "Workshop"
+format:
+   pdf:
+       include-in-header:
+           - text: |
+                \usepackage{todonotes}
+                \usepackage{graphicx}
+                \usepackage{amsmath}
+       documentclass: asaproc
+       classoption: [11pt]
+editor: source
+cite-method: biblatex
+bibliography: Polvices.bib
+biblatexoptions: 
+  - citestyle=authoryear
+author:
+  - name: "Alberto Rocha \\thanks{Instituto Português do Mar e da Atmosfera}"
+    corresponding: true
+  - name: "Ana Moreno \\thanks{Instituto Português do Mar e da Atmosfera}"
+    corresponding: false
+number-sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| eval: false
+#| echo: false
+tinytex::parse_install("report.log")
+tinytex::tlmgr_update()
+options(device = "windows")#default is RStudioGD)
+
+
+# https://cameronpatrick.com/post/2023/07/quarto-thesis-formatting/
+```
+
+```{r setup}
+#| include: false
+
+library(CatDyn)
+library(RTMB)
+library(wesanderson)
+library(tidyverse)
+library(xtable)
+library(tmbstan)
+library(shinystan)
+
+source('scripts/custom_catdyn_fit.R')
+source('scripts/custom_catdyn_bsd.R')
+source('scripts/funcoes_catdyn.R')
+
+load("data/df_effort_m_mbw_otb.Rdata")
+load('data/mbw_model.Rdata')
+
+mod_aux = lm(df_effort$catch ~ df_effort$effort)
+
+# Fix a couple of outliers
+df_effort = 
+  df_effort %>% 
+  mutate(catch = case_when(year_sale == 2005 &
+                             month_sale == '09' ~
+                             effort * mod_aux$coefficients[2] +
+                             mod_aux$coefficients[1],
+                           T ~ catch),
+         catch_otb = case_when(year_sale == 2005 &
+                                 month_sale == '09' ~
+                                 effort_otb * mod_aux$coefficients[2] +
+                                 mod_aux$coefficients[1],
+                               T ~ catch_otb)) %>% 
+  mutate(catch_otb = case_when(catch_otb == 0 ~ mean(catch_otb), 
+                               T ~ catch_otb),
+         effort_otb = case_when(effort_otb  < 150 ~ mean(effort_otb),
+                                T ~ effort_otb))
+
+```
+
+## Example from Equador
+
+```{r}
+df_e = read.csv('WS/tibec.14.22.pg.1.csv',
+                header = T)
+options(max.print=12000,scipen=6)
+source("WS/CatDynBSD9P.R")
+
+
+tibec.14.22.pg.2 <- as.CatDynData(x=tibec.14.22.pg.1,
+                                  step="month",
+                                  fleet.name=c("Pelagic"),
+                                  coleff=4,
+                                  colcat=3,
+                                  colmbw=5,
+                                  unitseff="ntrips",
+                                  unitscat="kg",
+                                  unitsmbw="kg",
+                                  nmult="thou",
+                                  season.dates=c("2014-01-01","2022-12-31"))
+
+```
+
+
+## Example from Robinson Crusue
+
+Because there is high intra-anual variation, we will be fitting season-to-season. This allows for estimates to be made for each season
+
+```{r}
+library(mice)
+
+df_rc = read.csv("WS/RobinsonCrusoeLobster.csv",header=TRUE)
+
+jflcrusoe0203  <- as.CatDynData(x=df_rc[df_rc$Season==1,],
+                                step="week",
+                                fleet.name="nasas",
+                                coleff=4,
+                                colcat=5,
+                                colmbw=6,
+                                unitseff="ndays",
+                                unitscat="kg",
+                                unitsmbw="g",
+                                nmult="thou",
+                                season.dates=c("2002-09-28","2003-05-22"))
+
+plot(x=jflcrusoe0203,mark=TRUE,offset=c(9,10),hem="S") 
+
+# 43 51 candidate input weeks
+#
+# Initial values for pure depletion variant
+max.age   <- 45
+time.step <- "week"
+M.Hoenig(max.age,time.step)
+#   M.pred.week M.pred.SE.week
+# 1 0.001937482   0.0004004866
+sum(jflcrusoe0203$Data$nasas$obscat.thou)                                       # for N0.ini
+#[1] 21.98468
+M.ini       <- 2*0.001937482
+N0.ini      <- 7*21.98468
+k.ini       <- 1e-4                                                             # always between 1e-3 and 1e-6
+alpha.ini   <- 1                                                                # always close to 1
+beta.ini    <- 1                                                                # always close to 1
+pars.ini.0P <- log(c(M.ini,N0.ini,k.ini,alpha.ini,beta.ini))                    # Always transform to log
+#
+dates.0P    <- c(head(jflcrusoe0203$Data$nasas$time.step,1),                    # for pure depletion models (0 in-season inputs/outputs)
+                 tail(jflcrusoe0203$Data$nasas$time.step,1))                    # just start and end week
+#
+jflcrusoe0203.0P.apn.ini <- catdynexp(x=jflcrusoe0203,                          # creating a toy model with
+                                      p=0,                                      # catdynexp
+                                      par=pars.ini.0P,
+                                      dates=dates.0P,
+                                      distr="apnormal")
+#
+plot(x=jflcrusoe0203.0P.apn.ini,
+      #plot the toy model to check
+     leg.pos="topleft",                                                         # quality of initial parameter values
+     Biom.tstep=1,
+     Biom.xpos=0.8,
+     Biom.ypos=0.8,
+     Cat.tstep=dim(jflcrusoe0203$Data$nasas)[1],
+     Cat.xpos=0.8,
+     Cat.ypos=0.7)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

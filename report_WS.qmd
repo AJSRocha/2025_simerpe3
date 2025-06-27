@@ -52,6 +52,8 @@ source('scripts/funcoes_catdyn.R')
 load("data/df_effort_m_mbw_otb.Rdata")
 load('data/mbw_model.Rdata')
 
+source("WS/CatDynBSD9P.R")
+
 mod_aux = lm(df_effort$catch ~ df_effort$effort)
 
 # Fix a couple of outliers
@@ -75,172 +77,118 @@ df_effort =
 ```
 
 ```{r estim_catdyn}
-cat_df = as.CatDynData(x=df_effort %>%
-                         filter(as.numeric(
-                           as.character(year_sale)) %in% c(2006:2023)),
-                       step="month",
-                       fleet.name="MIS+OTB-S",
-                       coleff=6,
-                       colcat=5,
-                       colmbw=9,
-                       unitseff="trips",
-                       unitscat="kg",
-                       unitsmbw="kg",
-                       nmult="thou",
-                       season.dates=c(as.Date("2006-01-01"),
-                                      last_date_of_week(2023, 52)-1))
 
-# plot.CatDynData(cat_df,
-#                 mark = T,
-#                 offset = c(0,1,10),
-#                 hem = 'N')
+tibec.14.22.pg.1 <- read.csv("WS/tibec.14.22.pg.1.csv",header=TRUE)
 
-indice_manual =
-  list(
-    10,11,12,
-    12,12,10,11,12,
-    11,10,12,7,10,
-    12,11,12,12,10)
+tibec.14.22.pg.2 <- as.CatDynData(x=tibec.14.22.pg.1,
+                                  step="month",
+                                  fleet.name=c("Pelagic"),
+                                  coleff=4,
+                                  colcat=3,
+                                  colmbw=5,
+                                  unitseff="ntrips",
+                                  unitscat="kg",
+                                  unitsmbw="kg",
+                                  nmult="thou",
+                                  season.dates=c("2014-01-01","2022-12-31"))
 
-for(i in 0:(length(indice_manual)-1)){
-  indice_manual[[i+1]] = 12*i + indice_manual[[i+1]]
-}
-
-# unlist(indice_manual)
+P1.Pelagic  <- 12  #2014
+P2.Pelagic  <- 24  #2015
+P3.Pelagic  <- 36  #2016
+P4.Pelagic  <- 47  #2017 
+P5.Pelagic  <- 60  #2018 
+P6.Pelagic  <- 72  #2019
+P7.Pelagic  <- 84  #2020 
+P8.Pelagic  <- 96  #2021
+P9.Pelagic  <- 107 #2022
 #
-cat_df$Data$`MIS+OTB-S` %>%
-  mutate(year = ((time.step -1) %/% 12),
-         x2 = rep(1:12,length(year)/12)) %>%
-  ggplot() +
-  geom_line(aes(color = factor(year)),
-            linewidth = 1) +
-  aes(y = spikecat,
-      x = x2) +
-  facet_wrap(year ~.) +
-  scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(
-    length(cat_df$Data$`MIS+OTB-S`$time.step)/12)) +
-  theme_bw() +
-  theme(legend.position = 'none')
+tibec.14.22.pg.dates.1  <- c(head(tibec.14.22.pg.2$Data[[1]]$time.step,1),
+                             P1.Pelagic,
+                             P2.Pelagic,
+                             P3.Pelagic,
+                             P4.Pelagic,
+                             P5.Pelagic,
+                             P6.Pelagic,
+                             P7.Pelagic,
+                             P8.Pelagic,
+                             P9.Pelagic,
+                             tail(tibec.14.22.pg.2$Data[[1]]$time.step,1))
+
+M.ini             <- 0.015
+N0.ini            <- 500
+P1.ini.Pelagic    <- 100 #12  2014
+P2.ini.Pelagic    <- 50  #24  2015
+P3.ini.Pelagic    <- 50  #36  2016
+P4.ini.Pelagic    <- 50  #47  2017
+P5.ini.Pelagic    <- 100 #60  2018
+P6.ini.Pelagic    <- 60  #72  2019
+P7.ini.Pelagic    <- 350 #84  2020
+P8.ini.Pelagic    <- 150 #96  2021
+P9.ini.Pelagic    <- 150 #107 2022
+k.ini.Pelagic     <- 2e-6
+alpha.ini.Pelagic <- 1
+beta.ini.Pelagic  <- 1
 #
+psi.ini.Pelagic    <- 0.25*sd(tibec.14.22.pg.2$Data$Pelagic$obscat.thou[tibec.14.22.pg.2$Data$Pelagic$obscat.thou>0])^2
+psilog.ini.Pelagic <- 0.25*sd(log(tibec.14.22.pg.2$Data$Pelagic$obscat.thou[tibec.14.22.pg.2$Data$Pelagic$obscat.thou>0]))^2
+
+tibec.14.22.pg.pars.ini <- log(c(M.ini,
+                                 N0.ini,
+                                 P1.ini.Pelagic,
+                                 P2.ini.Pelagic,
+                                 P3.ini.Pelagic,
+                                 P4.ini.Pelagic,
+                                 P5.ini.Pelagic,
+                                 P6.ini.Pelagic,
+                                 P7.ini.Pelagic,
+                                 P8.ini.Pelagic,
+                                 P9.ini.Pelagic,
+                                 k.ini.Pelagic,
+                                 alpha.ini.Pelagic,
+                                 beta.ini.Pelagic,
+                                 psi.ini.Pelagic,
+                                 psilog.ini.Pelagic))
 #
-#first trial
-a = Sys.time()
-fit_null =
-  trialer(cat_df,
-           p = 18,
-                M = 0.05976,
-                N0.ini = 14020,
-                P = indice_manual,
-                P.ini  = list(
-                5744,40315,3534,
-                21558,2766,9735,
-                55453,3438,16525,
-                10746,14552,2524,
-                22789,12567,34463,
-                20000,20000,20000),
-                k.ini = 0.00003546,
-                alpha.ini = 1.1455,
-                beta.ini  = 0.6134,
-                distr = i,
-                method = j,
-                itnmax = 10000,
-                disp = list(100))
-b = Sys.time()
-b-a
+
+
+
+tibec.14.22.pg.ini.apn <- catdynexp(x=tibec.14.22.pg.2,                                 
+                                    p=9,
+                                    par=tibec.14.22.pg.pars.ini[1:15],
+                                    dates=tibec.14.22.pg.dates.1,
+                                    distr="normal")
+
+plot(x=tibec.14.22.pg.ini.apn,
+     leg.pos="topleft",
+     Biom.tstep=1,
+     Biom.xpos=0.25,
+     Biom.ypos=0.75,
+     Cat.tstep=12,
+     Cat.xpos=0.25,
+     Cat.ypos=0.65)
 #
-# # all fits
-a = Sys.time()
-distribuicoes = c("gamma", "lognormal","normal","negbin","aplnormal", "apnormal")
-optimizadores = c('CG', 'spg', 'BFGS', 'Nelder-Mead')
-gdm_log_06 = data_frame(distr = character(),
-                        methods = character())
-modelos_gdm_06 = list()
-for(i in distribuicoes){
-  for(j in optimizadores){
-    tryCatch({
-      modelos_gdm_06[[length(modelos_gdm_06)+1]] =
-        trialer(cat_df,
-                p = 18,
-                M = 0.05976,
-                N0.ini = 14020,
-                P = indice_manual,
-                P.ini  = list(
-                5744,40315,3534,
-                21558,2766,9735,
-                55453,3438,16525,
-                10746,14552,2524,
-                22789,12567,34463,
-                20000,20000,20000),
-                k.ini = 0.00003546,
-                alpha.ini = 1.1455,
-                beta.ini  = 0.6134,
-                distr = i,
-                method = j,
-                itnmax = 10000,
-                disp = list(100))
+tibec.14.22.pg.apn.1.fit <- CatDynFit(x=tibec.14.22.pg.2,
+                                      p=9,
+                                      par=tibec.14.22.pg.pars.ini[1:15],
+                                      dates=tibec.14.22.pg.dates.1,
+                                      distr="normal",
+                                      method=c("CG"),
+                                      itnmax=50000)
+#
+tibec.14.22.pg.apn.1.fit.pred.CG <- CatDynPred(x=tibec.14.22.pg.apn.1.fit,method="CG")
 
-      gdm_log_06[nrow(gdm_log_06)+1,1] = i
-      gdm_log_06[nrow(gdm_log_06),2] = j
-    },
-    error=function(e){print(paste(i,j))
-    })
-  }
-}
-b = Sys.time()
-b-a
-
-resultados_06 = lapply(modelos_gdm_06, function(x){x$fit})
-
-
-pred_06 = lapply(modelos_gdm_06, function(x){x$pred})
-CatDynSum(x=resultados_06,
-          season=2006,
-          method=gdm_log_06$methods) %>% View
-
-
-# plotador(cat_df, fit_null, pre = F,
-#          post1 = T,
-#          post2 = T)
-save(fit_null,
-     resultados_06,
-     pred_06,
-     gdm_log_06,
-     file = 'data/preliminar_catdyn_fits.Rdata')
-
-load('data/preliminar_catdyn_fits.Rdata')
-# plotador(cat_df, fit_null, pre = F,
-#          post1 = T,
-#          post2 = T)
-
-
-# exclude failures
-tabela = 
-CatDynSum(x=resultados_06,
-          season=2006,
-          method=gdm_log_06$methods) %>% 
-  mutate(across(everything(),
-                function(x){
-    as.vector(unlist(x))}))
-
-modelos_completos = 
-tabela %>% 
-  mutate(indice = 1:nrow(tabela)) %>% 
-  filter(!if_any(everything(), is.nan)) %>% select(indice)
-
-# 12
-tabela[12,]
-
-res_06 = list()
-res_06$pred = pred_06[[modelos_completos$indice]]
-res_06$fit = resultados_06[[modelos_completos$indice]]
+x                        <- data.frame(key=rep(1:12,9),
+                                       x=tibec.14.22.pg.2$Data$Pelagic$obsmbw.kg)
+y                        <- aggregate(x$x,list(x$key),sd)
+tibec.14.22.pg.apn.1.bsd <- CatDynBSD9P(x=tibec.14.22.pg.apn.1.fit,
+                                        method="CG",
+                                        multi=TRUE,
+                                        mbw.sd=y$x)
 
 annual_biomass =
-  CatDynBSD(res_06$fit,
-            method = names(res_06$fit$Model),
-            multi = T,
-            mbw.sd = predicos$se.fit) %>% 
-  mutate(TimeStep = 216,
-         x =seq(2006,2023+11/12,1/12)) 
+tibec.14.22.pg.apn.1.bsd %>% 
+  mutate(TimeStep = 108,
+         x =seq(2014,2022+11/12,1/12))
 
 ```
 
@@ -259,12 +207,12 @@ ggplot() +
   # coord_cartesian(ylim = c(0, 300000), xlim = c(1995,2024)) +
   theme_bw()
 
-results = res_06$pred$Model$Results %>% 
+results = tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results %>% 
   as.data.frame() %>% 
-  mutate(x = 1:216)
+  mutate(x = 1:108)
 
-natural_mortality = res_06$fit$Model$spg$bt.par$M
-natural_mortality_sd = res_06$fit$Model$spg$bt.stdev[['M']]
+natural_mortality = tibec.14.22.pg.apn.1.fit $Model$spg$bt.par$M
+natural_mortality_sd = tibec.14.22.pg.apn.1.fit $Model$spg$bt.stdev[['M']]
 
 # Fishing Mortality
 results %>% 
@@ -440,40 +388,19 @@ Both allow non-linearity for $E_t$ and $N_t$;
 
 dat = list()
 
-dat$Ct = as.vector(df_effort$catch_otb[as.numeric(
-  as.character(
-    df_effort$year_sale))>2005]/
-                     df_effort$res[as.numeric(
-                       as.character(
-                         df_effort$year_sale))>2005])  # catches
+dat$Ct = as.vector(tibec.14.22.pg.2$Data$Pelagic$obscat.thou)  # catches
 
-dat$Et = as.vector(df_effort$effort_otb[as.numeric(
-  as.character(
-    df_effort$year_sale))>2005]) # effort
+dat$Et = as.vector(tibec.14.22.pg.2$Data$Pelagic$obseff.ntrips) # effort
 
-indice_manual_2 = 
-  list(
-    10,11,12,
-    12,12,10,11,12,
-    11,12,10,12,11,
-    12,12,12,12,10)
+indice_manual = c(12,24,36,47,60,72,84,96,107)
 
-indice_manual_v = 
-  list(
-    7,7,7,
-    7,7,7,7,7,
-    7,7,7,7,7,
-    7,7,7,7,7)
-
-for(i in 0:(length(indice_manual_2)-1)){
-  indice_manual_2[[i+1]] = 12*i + indice_manual_2[[i+1]]
+I = list()
+for(i in 1:length(indice_manual)){
+  I[[i]] = rep(1,length(dat$Ct))
+  I[[i]][1:length(I[[i]])<indice_manual[i]] = 0
 }
 
-for(i in 0:(length(indice_manual_v)-1)){
-  indice_manual_v[[i+1]] = 12*i + indice_manual_v[[i+1]]
-}
-dat$u = unlist(indice_manual_2) # recruitment pulse timings
-dat$v = unlist(indice_manual_v)
+dat$u = unlist(indice_manual)
 
 # initialize parameter list with initial estimates
 par = list()
@@ -481,19 +408,18 @@ par = list()
 # par$Rt_scaled = as.vector(rep(20,
 #                               length(dat$u)))# init empty vector
 
-par$Rt_scaled = c(57.744,40.315,3.534,21.558,2.766,
-                     9.735,55.453,3.438,16.525,10.746,
-                     14.552,2.524,22.789,12.567,34.463,
-                     15.000,15.000,15.000)
+par$Rt_scaled = c(P1.ini.Pelagic, P2.ini.Pelagic, P3.ini.Pelagic,
+                  P4.ini.Pelagic, P5.ini.Pelagic, P6.ini.Pelagic,
+                  P7.ini.Pelagic, P8.ini.Pelagic, P9.ini.Pelagic)
 
-par$Ft_scaled = as.vector(rep(2,
-                              length(dat$u)))# init empty vector
+# par$Ft_scaled = as.vector(rep(2,
+                              # length(dat$u)))# init empty vector
 
-par$logalpha = log(.5)
-par$logbeta = log(.5)
-par$logK = log(0.001)
-par$logN0_scaled = log(6000000) # inserir nmult
-par$logM = log(0.001)
+par$logalpha = log(alpha.ini.Pelagic)
+par$logbeta = log(beta.ini.Pelagic)
+par$logK = log(k.ini)
+par$logN0_scaled = log(N0.ini) # inserir nmult
+par$logM = log(M.ini)
 
 par$logsdCt = 20
 
@@ -506,12 +432,12 @@ jnll = function(par){
   alpha = exp(logalpha)
   beta = exp(logbeta)
   K = exp(logK)
-  N0 = 1e6 * exp(logN0_scaled)
+  N0 = 1 * exp(logN0_scaled)
   # N0 = exp(logN0)
   M = exp(logM)
   sdCt = exp(logsdCt)
-  Rt = 1e6 * Rt_scaled
-  Ft = 1e6 * Ft_scaled
+  Rt = 1 * Rt_scaled
+  # Ft = 1 * Ft_scaled
   
   # assemble model    
   jnll = 0 # init jnll
@@ -551,12 +477,12 @@ jnll = function(par){
     # Recruitment pulses
     
     part3 = 0
-    for(j in seq_along(u[u<=mes])){
-      part3 = part3 + Rt[j]*exp(-M*(mes-u[j]))}
+    for(j in seq_along(u)){
+      part3 = part3 + I[[j]][mes] * Rt[j]*exp(-M*(mes-u[j]))}
     
     part4 = 0
-    for(j in seq_along(v[v<=mes])){
-      part4 = part4 + Ft[j]*exp(-M*(mes-v[j]))}
+    # for(j in seq_along(v[v<=mes])){
+    #   part4 = part4 + Ft[j]*exp(-M*(mes-v[j]))}
     
     
     # Assemble
@@ -574,7 +500,7 @@ jnll = function(par){
 # quick test: do we get a number? This number should be a likelihood.
 jnll(par)
 
-obj7 = MakeADFun(jnll, par, random = c('Rt_scaled', 'Ft_scaled'))
+obj7 = MakeADFun(jnll, par, random = c('Rt_scaled'))
 
 
 obj7$report()['catch']
@@ -724,9 +650,6 @@ results %>%
     geom_line(aes(x =Period.month, 
                 y = Predicted.Catch.kg),
             col = 'red', linetype =2) + 
-  geom_line(aes(x =Period.month, 
-                y = dat$Ct),
-            col = 'green', linetype =2) + 
   theme_bw()
 ```
 
@@ -735,19 +658,19 @@ results %>%
 #| echo: false
 
 set.seed(1)
-pred7 = rnorm(216,
+pred7 = rnorm(108,
               meanvec7,
               sdy)
 
 ggplot() + 
-  geom_point(aes(x = 1:216,
+  geom_point(aes(x = 1:108,
                 y = dat$Ct)) +
-   geom_line(aes(x = 1:216,
+   geom_line(aes(x = 1:108,
                 y = pred7),
             color = 'green') + 
-  geom_line(aes(x = 1:216,
-                y = obj7$report()['catch'] %>% unlist()),
-            color = 'red') +
+  # geom_line(aes(x = 1:108,
+  #               y = obj7$report()['catch'] %>% unlist()),
+  #           color = 'red') +
   theme_bw()
 ```
 
