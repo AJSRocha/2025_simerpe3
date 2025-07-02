@@ -211,8 +211,8 @@ results = tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results %>%
   as.data.frame() %>% 
   mutate(x = 1:108)
 
-natural_mortality = tibec.14.22.pg.apn.1.fit $Model$spg$bt.par$M
-natural_mortality_sd = tibec.14.22.pg.apn.1.fit $Model$spg$bt.stdev[['M']]
+natural_mortality = tibec.14.22.pg.apn.1.fit $Model$CG$bt.par$M
+natural_mortality_sd = tibec.14.22.pg.apn.1.fit $Model$CG$bt.stdev[['M']]
 
 # Fishing Mortality
 results %>% 
@@ -275,113 +275,6 @@ results %>%
 
 # RTMB
 
-## Formulation, step by step
-
-Consider the condensed formulation of this model, where catch in numbers is modeled as a function of observed effort and several parameters.
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_1}
-C_t = kE_t^\alpha N_t^\beta = m kE_t^\alpha f_t(M,N_0, C_{i<t}, R, S) \\
-\textrm{with} \quad m = e^{-\frac{M}{2}}
-    \end{aligned}
-\end{equation}
-
-The author typically considers several distributions for this process and tries them, along as several optimizers, in a systematic, grid-search-like approach.
-
-In order to incorporate this model in RTBM, we will have to break down the abundance estimate ($N_t^\beta$) into chunks that are easier to process. First we present the complete formulation and then we'll break down the chunks of $f(t)$ *ie*, everything that is raised to $\beta$.
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_2}
-C_t = kE_t^\alpha  m \left( N_0 e^{-Mt} -m \left[ \sum_{i=i}^{i=t-1} C_{i,i} e^{-M(t-i-1)} \right] + \sum_{j=1}^{j=u} I_j R_j e^{-M(t-\tau_j)} - \sum_{l=1}^{l=v} J_l S_l e^{-M(t-\upsilon_l} \right) ^ \beta
-    \end{aligned}
-\end{equation}
-
-## Chunk 1: Exponential Population Growth
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_ch1}
-N_0 e^{-Mt}
-    \end{aligned}
-\end{equation}
-
-The first term consists simply of natural population decay driven by natural mortality $M$, as illustrated below. Unlike other models, birth-driven input (recruitment) is not incorporated at this stage in the model. The model is only concerned with individuals available to the fishery, so until recruits attain a size that makes them eligible they are not accounted for. Their entry into the fishery will be modelled as discrete spikes.
-
-```{r}
-#| echo: false
-#| warning: false
-
-N0 = 1000000
-x = 1:348
-M = 0.05
-
-res_1 = c()
-# chunk 1
-for(tt in 1:length(x)){
-ch1 = N0 * exp(-M*tt)
-
-res_1[tt] = ch1
-}
-
-  ggplot() + 
-  geom_line(aes(x = x,
-                y = res_1)) + 
-  theme_bw() + 
-  labs(title = 'chunk 1')
-```
-
-## Chunk 2: Catch carry over
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_ch2}
- -m \left[ \sum_{i=i}^{i=t-1} C_{i,i} e^{-M(t-i-1)} \right] 
-    \end{aligned}
-\end{equation}
-
-This section incorporates the expected value for the catch in each year, with decay from natural mortality that intensifies the further you are from that year. It is explicitly recursive, unlike chunk 1, and therefore the code must account for that correctly. 
-
-It is unclear if $C_i$ accounts for the *entire* estimate in previous iterations or simply previous observations. For this report, the second alternative was implemented in the objective function
-
-## Chunk 3: Recruitment pulse input
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_2}
-    \sum_{j=1}^{j=u} I_j R_j e^{-M(t-\tau_j)}
-    \end{aligned}
-\end{equation}
-
-This chunk adds the recruitment pulses at timing $\tau_j$, of magnitude $R_j$, modulated by the time passed between $t$ and $\tau_j$. There is a quirk in this formulation regarding the use of an indicator vector $I_j$, which in all papers published by the author of CatDyn is said to be 0 when $\tau_j < t$ and 1 afterwards. This interpretation, combined with the double negative signals in the exponential component of the chunk, leads to a scenario where recruitment spikes that occur after the time step $t$ contribute to $C_t$, where as spikes before $t$ are nullified by the 0 in the indicator vector $I_j$. 
-
-In this work, an alternative formulation that is sometimes used by the author where the indicator vector is ommited. This does not mitigate the exponent signal effect, however.
-
-Finally, the timings for the perturbations in the vector $\tau_j$ must be manually inserted by the user after visual inspection of the data. The author has develloped an approach regarding catch spike statistics that will not be discussed here, so for the sake of this report $\tau_j$ will be inserted manually into the parameter list.
-
-There is a similar chunk with an inverted signal that accounts for emigration pulses; in octopus fisheries this is thought to reflect the moments when females leave the fishery after spawning. Currently it is assumed, due to the fishing gears used in the portuguese fishery, that such an exit does not occur in this particular case.
-
-## Parameters to be estimated
-
--   $\alpha$ is the abundance response
-
--   $\beta$ is the effort response
-
-Both allow non-linearity for $E_t$ and $N_t$;
-
--   $k$ is a scaling factor
-
--   $M$ is the natural mortality (with $m = e^{-\frac{M}{2}}$)
-
--   $N_0$ is the initial abundance of the stock at $t_0$
-
--  $R_j$ are the recruitment pulse magnitudes
-
-## Model 3.1: GDM, as seen on CatDyn
-
-
-
 ```{r}
 #| results: hide
 #| warning: false
@@ -397,7 +290,8 @@ indice_manual = c(12,24,36,47,60,72,84,96,107)
 I = list()
 for(i in 1:length(indice_manual)){
   I[[i]] = rep(1,length(dat$Ct))
-  I[[i]][1:length(I[[i]])<indice_manual[i]] = 0
+  # I[[i]][1:length(I[[i]])<indice_manual[i]] = 0
+  I[[i]][1:indice_manual[i]] <- 0
 }
 
 dat$u = unlist(indice_manual)
@@ -417,7 +311,7 @@ par$Rt_scaled = c(P1.ini.Pelagic, P2.ini.Pelagic, P3.ini.Pelagic,
 
 par$logalpha = log(alpha.ini.Pelagic)
 par$logbeta = log(beta.ini.Pelagic)
-par$logK = log(k.ini)
+par$logK = log(k.ini.Pelagic)
 par$logN0_scaled = log(N0.ini) # inserir nmult
 par$logM = log(M.ini)
 
@@ -437,7 +331,7 @@ jnll = function(par){
   M = exp(logM)
   sdCt = exp(logsdCt)
   Rt = 1 * Rt_scaled
-  # Ft = 1 * Ft_scaled
+
   
   # assemble model    
   jnll = 0 # init jnll
@@ -447,7 +341,7 @@ jnll = function(par){
   catch = advector(rep(0, length(dat$Ct)))
   
     for(mes in 1:length(dat$Ct)){
-       # core
+    # core
     m = exp(-M/2)
     
     if(mes == 1){
@@ -460,20 +354,13 @@ jnll = function(par){
     
     part1 = N0*exp(-M*mes)
     
-    # catch aggregation
     
-    ## Using the observation series 
-    # part2 = 0
-    # for(mes_ant in seq_len(length(dat$Ct)-1)){
-    #   part2 = part2 + Ct[mes_ant]*exp(-M*(mes-mes_ant-1))}
-    
-    ## Using the expected catch recursively
     part2 = 0
-      # if(mes != 1){
+    
     for(mes_ant in 1:(mes-1)){
     part2 = part2 + catch[mes_ant]*exp(-M*(mes-mes_ant-1))}
 
-    # }
+    
     # Recruitment pulses
     
     part3 = 0
@@ -481,10 +368,130 @@ jnll = function(par){
       part3 = part3 + I[[j]][mes] * Rt[j]*exp(-M*(mes-u[j]))}
     
     part4 = 0
-    # for(j in seq_along(v[v<=mes])){
-    #   part4 = part4 + Ft[j]*exp(-M*(mes-v[j]))}
+
+    # Assemble
+    pred = core * (part1 - m * part2 + part3 - part4)^beta}
+    
+    catch[mes] = advector(pred)
+    
+    jnll = jnll - dnorm(Ct[mes], pred, sdCt, log = T)
+   
+  }
+  REPORT(catch)
+  jnll
+}
+
+# quick test: do we get a number? This number should be a likelihood.
+jnll(par)
+
+obj7 = MakeADFun(jnll, par, random = c('Rt_scaled'))
+
+
+obj7$report()['catch']
+
+fit7 = nlminb(obj7$par, obj7$fn, obj7$gr)
+
+sdr7 = sdreport(obj7)
+pl7 = as.list(sdr7,"Est")
+plsd7 = as.list(sdr7,"Std")
+```
+
+# ALT
+
+```{r}
+#| results: hide
+#| warning: false
+
+dat = list()
+
+dat$Ct = as.vector(tibec.14.22.pg.2$Data$Pelagic$obscat.thou)  # catches
+
+dat$Et = as.vector(tibec.14.22.pg.2$Data$Pelagic$obseff.ntrips) # effort
+
+indice_manual = c(12,24,36,47,60,72,84,96,107)
+
+I = list()
+for(i in 1:length(indice_manual)){
+  I[[i]] = rep(1,length(dat$Ct))
+  # I[[i]][1:length(I[[i]])<indice_manual[i]] = 0
+  I[[i]][1:indice_manual[i]] <- 0
+}
+
+dat$u = unlist(indice_manual)
+
+# initialize parameter list with initial estimates
+par = list()
+
+# par$Rt_scaled = as.vector(rep(20,
+#                               length(dat$u)))# init empty vector
+
+par$Rt_scaled = c(P1.ini.Pelagic, P2.ini.Pelagic, P3.ini.Pelagic,
+                  P4.ini.Pelagic, P5.ini.Pelagic, P6.ini.Pelagic,
+                  P7.ini.Pelagic, P8.ini.Pelagic, P9.ini.Pelagic)
+
+# par$Ft_scaled = as.vector(rep(2,
+                              # length(dat$u)))# init empty vector
+
+par$logalpha = log(alpha.ini.Pelagic)
+par$logbeta = log(beta.ini.Pelagic)
+par$logK = log(k.ini.Pelagic)
+par$logN0_scaled = log(N0.ini) # inserir nmult
+par$logM = log(M.ini)
+
+par$logsdCt = 20
+
+# initialize joint negative loglikelihood function
+jnll = function(par){
+  getAll(par, dat) # invoke all the parameters and data
+  
+  # gather and cleanup pars
+  Ct = OBS(Ct)
+  alpha = exp(logalpha)
+  beta = exp(logbeta)
+  K = exp(logK)
+  N0 = 1 * exp(logN0_scaled)
+  # N0 = exp(logN0)
+  M = exp(logM)
+  sdCt = exp(logsdCt)
+  Rt = 1 * Rt_scaled
+
+  
+  # assemble model    
+  jnll = 0 # init jnll
+ 
+  # Initial values
+ 
+  catch = advector(rep(0, length(dat$Ct)))
+  
+    for(mes in 1:length(dat$Ct)){
+    # core
+    m = exp(-M/2)
+    
+    if(mes == 1){
+      pred = K*Et[mes]^alpha * m * (N0*exp(-M*1))^beta
+    }else{
+    
+    core = K*(Et[mes]^alpha) * m 
+    
+    # M-driven decay
+    
+    part1 = N0*exp(-M*mes)
     
     
+    part2 = 0
+    
+    for(mes_ant in 1:(mes-1)){
+    part2 = part2 + catch[mes_ant]*exp(-M*(mes-mes_ant-1))}
+
+    
+    # Recruitment pulses
+    
+    part3 = 0
+    for(j in seq_along(u)){
+      part3 = part3 + I[[j]][mes] * Rt[j]*exp(-M*(mes-u[j]))}
+    
+    part4 = 0
+
     # Assemble
     pred = core * (part1 - m * part2 + part3 - part4)^beta}
     
