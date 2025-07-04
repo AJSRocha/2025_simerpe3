@@ -403,103 +403,69 @@ plsd7 = as.list(sdr7,"Std")
 #| warning: false
 
 dat = list()
+dat$Ct = as.vector(tibec.14.22.pg.2$Data$Pelagic$obscat.thou)         # observed catch
+dat$Et = as.vector(tibec.14.22.pg.2$Data$Pelagic$obseff.ntrips)       # effort
+dat$u = c(12, 24, 36, 47, 60, 72, 84, 96, 107)                        # recruitment pulse months
+nT = length(dat$Ct)
+nR = length(dat$u)
 
-dat$Ct = as.vector(tibec.14.22.pg.2$Data$Pelagic$obscat.thou)  # catches
-
-dat$Et = as.vector(tibec.14.22.pg.2$Data$Pelagic$obseff.ntrips) # effort
-
-indice_manual = c(12,24,36,47,60,72,84,96,107)
-
-I = list()
-for(i in 1:length(indice_manual)){
-  I[[i]] = rep(1,length(dat$Ct))
-  # I[[i]][1:length(I[[i]])<indice_manual[i]] = 0
-  I[[i]][1:indice_manual[i]] <- 0
+I = matrix(0, nrow = nT, ncol = nR)
+for (j in 1:nR) {
+  I[dat$u[j]:nT, j] <- 1
 }
 
-dat$u = unlist(indice_manual)
+dat$I = I
 
-# initialize parameter list with initial estimates
-par = list()
-
-# par$Rt_scaled = as.vector(rep(20,
-#                               length(dat$u)))# init empty vector
-
-par$Rt_scaled = c(P1.ini.Pelagic, P2.ini.Pelagic, P3.ini.Pelagic,
-                  P4.ini.Pelagic, P5.ini.Pelagic, P6.ini.Pelagic,
-                  P7.ini.Pelagic, P8.ini.Pelagic, P9.ini.Pelagic)
-
-# par$Ft_scaled = as.vector(rep(2,
-                              # length(dat$u)))# init empty vector
-
-par$logalpha = log(alpha.ini.Pelagic)
-par$logbeta = log(beta.ini.Pelagic)
-par$logK = log(k.ini.Pelagic)
-par$logN0_scaled = log(N0.ini) # inserir nmult
-par$logM = log(M.ini)
-
-par$logsdCt = 20
+# Initial parameter values
+par = list(
+  Rt_scaled     = c(P1.ini.Pelagic, P2.ini.Pelagic, P3.ini.Pelagic, P4.ini.Pelagic,
+                    P5.ini.Pelagic, P6.ini.Pelagic, P7.ini.Pelagic, P8.ini.Pelagic, P9.ini.Pelagic),
+  logalpha      = log(alpha.ini.Pelagic),
+  logbeta       = log(beta.ini.Pelagic),
+  logK          = log(k.ini.Pelagic),
+  logN0_scaled  = log(N0.ini),
+  logM          = log(M.ini),
+  logsdCt       = log(0.25 * sd(dat$Ct[dat$Ct > 0]))  # consistent with CatDyn
+)
 
 # initialize joint negative loglikelihood function
-jnll = function(par){
-  getAll(par, dat) # invoke all the parameters and data
-  
-  # gather and cleanup pars
-  Ct = OBS(Ct)
-  alpha = exp(logalpha)
-  beta = exp(logbeta)
-  K = exp(logK)
-  N0 = 1 * exp(logN0_scaled)
-  # N0 = exp(logN0)
-  M = exp(logM)
-  sdCt = exp(logsdCt)
-  Rt = 1 * Rt_scaled
+
+jnll = function(par) {
+  getAll(par, dat)
+
+  # Extract parameters
+  Ct     = OBS(Ct)
+  Et     = OBS(Et)
+  I_mat  = OBS(I)
+  alpha  = exp(logalpha)
+  beta   = exp(logbeta)
+  K      = exp(logK)
+  N0     = exp(logN0_scaled)
+  M      = exp(logM)
+  sdCt   = exp(logsdCt)
+  Rt     = Rt_scaled
 
   
-  # assemble model    
-  jnll = 0 # init jnll
+  # Initialize predicted catch and biomass
+  nT     = length(Ct)
+catch = rep(0, nT) * alpha   # Ensures catch becomes an AD type
+Bt = rep(0, nT) * alpha     # Ensures Bt becomes an AD type
+  Bt[1]  = N0  # start biomass at N0
  
-  # Initial values
- 
-  catch = advector(rep(0, length(dat$Ct)))
-  
-    for(mes in 1:length(dat$Ct)){
-    # core
-    m = exp(-M/2)
-    
-    if(mes == 1){
-      pred = K*Et[mes]^alpha * m * (N0*exp(-M*1))^beta
-    }else{
-    
-    core = K*(Et[mes]^alpha) * m 
-    
-    # M-driven decay
-    
-    part1 = N0*exp(-M*mes)
-    
-    
-    part2 = 0
-    
-    for(mes_ant in 1:(mes-1)){
-    part2 = part2 + catch[mes_ant]*exp(-M*(mes-mes_ant-1))}
+  # Forward simulation of catch and biomass
+  for (t in 1:nT) {
+    # Predict catch at time t
+    catch[t] = K * Et[t]^alpha * Bt[t]^beta
 
-    
-    # Recruitment pulses
-    
-    part3 = 0
-    for(j in seq_along(u)){
-      part3 = part3 + I[[j]][mes] * Rt[j]*exp(-M*(mes-u[j]))}
-    
-    part4 = 0
-
-    # Assemble
-    pred = core * (part1 - m * part2 + part3 - part4)^beta}
-    
-    catch[mes] = advector(pred)
-    
-    jnll = jnll - dnorm(Ct[mes], pred, sdCt, log = T)
-   
+    # Update biomass if not last timestep
+    if (t < nT) {
+      Rt_t = sum(I_mat[t + 1, ] * Rt)
+      Bt[t + 1] = Bt[t] * exp(-M) - catch[t] * exp(-M / 2) + Rt_t
+    }
   }
+  # Negative log-likelihood
+  jnll = -sum(dnorm(Ct, mean = catch, sd = sdCt, log = TRUE))
+
   REPORT(catch)
   jnll
 }
@@ -507,16 +473,13 @@ jnll = function(par){
 # quick test: do we get a number? This number should be a likelihood.
 jnll(par)
 
-obj7 = MakeADFun(jnll, par, random = c('Rt_scaled'))
+obj7 = MakeADFun(jnll, par, random = c("Rt_scaled"))
 
-
-obj7$report()['catch']
-
+# Run optimizer
 fit7 = nlminb(obj7$par, obj7$fn, obj7$gr)
 
-sdr7 = sdreport(obj7)
-pl7 = as.list(sdr7,"Est")
-plsd7 = as.list(sdr7,"Std")
+# Retrieve predicted catch
+predicted_catch = obj7$report()$catch
 ```
 
 \todo[inline]{NaN warnings were also produced here}
