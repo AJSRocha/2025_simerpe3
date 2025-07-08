@@ -453,16 +453,39 @@ Bt = rep(0, nT) * alpha     # Ensures Bt becomes an AD type
   Bt[1]  = N0  # start biomass at N0
  
   # Forward simulation of catch and biomass
-  for (t in 1:nT) {
-    # Predict catch at time t
-    catch[t] = K * Et[t]^alpha * Bt[t]^beta
-
-    # Update biomass if not last timestep
-    if (t < nT) {
-      Rt_t = sum(I_mat[t + 1, ] * Rt)
-      Bt[t + 1] = Bt[t] * exp(-M) - catch[t] * exp(-M / 2) + Rt_t
-    }
-  }
+    for(mes in 1:length(Ct)){
+    # core
+      if(mes == 1){
+      Bt[mes]  = N0
+      
+    }else{
+      
+           # M-driven decay
+      
+      part1 = N0*exp(-M*mes)
+      
+      
+      part2 = 0
+      
+      for(mes_ant in 1:(mes-1)){
+        part2 = part2 + catch[mes_ant]*exp(-M*(mes-mes_ant-1))}
+      
+      
+      # Recruitment pulses
+      
+      part3 = 0
+          part3 = sum(I_mat[mes,] * Rt)
+        # part3 = part3 + I[[j]][mes] * Rt[j]*exp(-M*(mes-u[j]))}
+      
+      part4 = 0
+      
+      # Assemble
+      Bt[mes] = part1 - m * part2 + part3 - part4}
+    
+      pred =  K*Et[mes]^alpha * m * (Bt[mes])^beta
+      catch[mes] = pred
+   }
+  
   # Negative log-likelihood
   jnll = -sum(dnorm(Ct, mean = catch, sd = sdCt, log = TRUE))
 
@@ -481,6 +504,21 @@ fit7 = nlminb(obj7$par, obj7$fn, obj7$gr)
 # Retrieve predicted catch
 predicted_catch = obj7$report()$catch
 ```
+
+```{r}
+tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results['Predicted.Catch.thou']
+catch
+
+
+ggplot() + 
+  geom_line(aes(x = 1:108,
+                y = unlist(tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results['Predicted.Catch.thou']))) + 
+  geom_line(aes(x = 1:108,
+                y = predicted_catch), col = 'red') + 
+  theme_bw()
+
+```
+
 
 \todo[inline]{NaN warnings were also produced here}
 
