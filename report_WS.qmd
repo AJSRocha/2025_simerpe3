@@ -428,6 +428,10 @@ par = list(
   logsdCt       = log(0.25 * sd(dat$Ct[dat$Ct > 0]))  # consistent with CatDyn
 )
 
+
+Rt_min = 0      # recruitment can't be negative
+Rt_max = 1e5    # or some upper limit from prior data or biomass capacit
+
 # initialize joint negative loglikelihood function
 
 jnll = function(par) {
@@ -445,17 +449,18 @@ jnll = function(par) {
   sdCt   = exp(logsdCt)
   Rt     = Rt_scaled
 
-  
+  jnll = 0
   # Initialize predicted catch and biomass
   nT     = length(Ct)
-catch = rep(0, nT) * alpha   # Ensures catch becomes an AD type
-Bt = rep(0, nT) * alpha     # Ensures Bt becomes an AD type
-  Bt[1]  = N0  # start biomass at N0
+  catch = rep(0, nT) * alpha   # Ensures catch becomes an AD type
+  Bt = rep(0, nT) * alpha     # Ensures Bt becomes an AD type
+
  
   # Forward simulation of catch and biomass
     for(mes in 1:length(Ct)){
     # core
       if(mes == 1){
+       # start biomass at N0
       Bt[mes]  = N0
       
     }else{
@@ -488,26 +493,49 @@ Bt = rep(0, nT) * alpha     # Ensures Bt becomes an AD type
   
   # Negative log-likelihood
   jnll = -sum(dnorm(Ct, mean = catch, sd = sdCt, log = TRUE))
-
+  if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
   REPORT(catch)
+  REPORT(Bt)
+  REPORT(Rt)
+  REPORT(N0)
   jnll
 }
+
+
 
 # quick test: do we get a number? This number should be a likelihood.
 jnll(par)
 
 obj7 = MakeADFun(jnll, par, random = c("Rt_scaled"))
 
+# Set bounds
+lower <- list(
+  Rt_scaled = rep(Rt_min, 9),
+  logalpha = -10, logbeta = -10, logK = -10,
+  logN0_scaled = -10, logM = -10, logsdCt = -10
+)
+
+upper <- list(
+  Rt_scaled = rep(Rt_max, 9),
+  logalpha = 10, logbeta = 10, logK = 10,
+  logN0_scaled = 10, logM = 10, logsdCt = 10
+)
+
 # Run optimizer
-fit7 = nlminb(obj7$par, obj7$fn, obj7$gr)
+fit7 = nlminb(obj7$par, obj7$fn, obj7$gr,
+  lower = unlist(lower),
+  upper = unlist(upper))
 
 # Retrieve predicted catch
 predicted_catch = obj7$report()$catch
+predicted_Bt = obj7$report()$Bt
+predicted_N0 = obj7$report()$N0
+predicted_Rt = obj7$report()$Rt
 ```
 
 ```{r}
-tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results['Predicted.Catch.thou']
-catch
+# tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results['Predicted.Catch.thou']
+# catch
 
 
 ggplot() + 

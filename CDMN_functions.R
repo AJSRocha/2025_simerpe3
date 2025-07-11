@@ -1,52 +1,70 @@
-#getAnywhere(".CDMNT1P")
+#getAnywhere(".CDMN9P") - sem transito
+#getAnywhere(".CDMNT9P") - com transito
 
 function (par, dates, obscat1, obseff1, obsmbm1, distr, properties, 
           output, pp = -1, partial) 
 {
   ts.start <- head(dates, 1)
   ts.P1 <- dates[2]
-  ts.N1 <- dates[3]
+  ts.P2 <- dates[3]
+  ts.P3 <- dates[4]
+  ts.P4 <- dates[5]
+  ts.P5 <- dates[6]
+  ts.P6 <- dates[7]
+  ts.P7 <- dates[8]
+  ts.P8 <- dates[9]
+  ts.P9 <- dates[10]
   ts.end <- tail(dates, 1)
   sealen <- ts.end - ts.start + 1
   nstep <- vector("numeric", sealen)
   mccum <- vector("numeric", sealen)
-  resn1 <- vector("numeric", sealen)
   effeff1 <- vector("numeric", sealen)
   effn1 <- vector("numeric", sealen)
   predcat1 <- vector("numeric", sealen)
-  ind.P1 <- ifelse(1:sealen < (ts.P1 - ts.start + 1), 0, 1)
-  ind.N1 <- ifelse(1:sealen < (ts.N1 - ts.start + 1), 0, 1)
+  ind.P1 <- ifelse(1:sealen < (ts.P1 - ts.start), 0, 1)
+  ind.P2 <- ifelse(1:sealen < (ts.P2 - ts.start), 0, 1)
+  ind.P3 <- ifelse(1:sealen < (ts.P3 - ts.start), 0, 1)
+  ind.P4 <- ifelse(1:sealen < (ts.P4 - ts.start), 0, 1)
+  ind.P5 <- ifelse(1:sealen < (ts.P5 - ts.start), 0, 1)
+  ind.P6 <- ifelse(1:sealen < (ts.P6 - ts.start), 0, 1)
+  ind.P7 <- ifelse(1:sealen < (ts.P7 - ts.start), 0, 1)
+  ind.P8 <- ifelse(1:sealen < (ts.P8 - ts.start), 0, 1)
+  ind.P9 <- ifelse(1:sealen < (ts.P9 - ts.start), 0, 1)
   logM <- par[1]
   logN0 <- par[2]
-  if (partial) {
-    logP1 <- par[3]
-    logQ1 <- par[4]
-    logscale <- par[5]
-    logalpha <- par[6]
-    logbeta <- par[7]
-  }
-  if (!partial) {
-    logP1 <- par[3]
-    logQ1 <- 1
-    logscale <- par[4]
-    logalpha <- par[5]
-    logbeta <- par[6]
-  }
+  logP1 <- par[3]
+  logP2 <- par[4]
+  logP3 <- par[5]
+  logP4 <- par[6]
+  logP5 <- par[7]
+  logP6 <- par[8]
+  logP7 <- par[9]
+  logP8 <- par[10]
+  logP9 <- par[11]
+  logscale <- par[12]
+  logalpha <- par[13]
+  logbeta <- par[14]
   mccum[1] <- 0
   nstep[1] <- exp(logN0) * exp(-exp(logM))
-  resn1[1] <- exp(logN0) * exp(-exp(logM))
   for (i in 2:sealen) {
     mccum[i] <- obscat1[i - 1] + mccum[i - 1] * exp(-exp(logM))
     nstep[i] <- exp(logN0) * exp(-exp(logM) * i) + ind.P1[i] * 
-      exp(logP1) * exp(-exp(logM) * (i - (ts.P1 - ts.start + 
-                                            1))) - mccum[i] * exp(-exp(logM)/2)
-    resn1[i] <- nstep[i] - ind.N1[i] * exp((1 - partial) * 
-                                             logP1 + (partial * logQ1)) * exp(-exp(logM) * (i - 
-                                                                                              ((1 - partial) * ts.P1 + partial * ts.N1 - ts.start + 
-                                                                                                 1)))
+      exp(logP1) * exp(-exp(logM) * (i - (ts.P1 - ts.start) + 
+                                       1)) + ind.P2[i] * exp(logP2) * exp(-exp(logM) * (i - 
+                                                                                          (ts.P2 - ts.start) + 1)) + ind.P3[i] * exp(logP3) * 
+      exp(-exp(logM) * (i - (ts.P3 - ts.start) + 1)) + 
+      ind.P4[i] * exp(logP4) * exp(-exp(logM) * (i - (ts.P4 - 
+                                                        ts.start) + 1)) + ind.P5[i] * exp(logP5) * exp(-exp(logM) * 
+                                                                                                         (i - (ts.P5 - ts.start) + 1)) + ind.P6[i] * exp(logP6) * 
+      exp(-exp(logM) * (i - (ts.P6 - ts.start) + 1)) + 
+      ind.P7[i] * exp(logP7) * exp(-exp(logM) * (i - (ts.P7 - 
+                                                        ts.start) + 1)) + ind.P8[i] * exp(logP8) * exp(-exp(logM) * 
+                                                                                                         (i - (ts.P8 - ts.start) + 1)) + ind.P9[i] * exp(logP9) * 
+      exp(-exp(logM) * (i - (ts.P9 - ts.start) + 1)) - 
+      mccum[i] * exp(-exp(logM)/2)
   }
   effeff1 <- obseff1^(exp(logalpha))
-  effn1 <- resn1^(exp(logbeta))
+  effn1 <- nstep^(exp(logbeta))
   predcat1 <- exp(logscale) * (effeff1 * effn1) * exp(-exp(logM)/2)
   Likel <- .CatDynLik1F(obscat1, predcat1, distr, par)
   if (output == "predict") {
@@ -66,7 +84,6 @@ function (par, dates, obscat1, obseff1, obsmbm1, distr, properties,
     return(negsup)
   }
 }
-
 
 CDMN1P1P
 function (par, dates, obscat1, obseff1, obsmbm1, obscat2, obseff2, 
