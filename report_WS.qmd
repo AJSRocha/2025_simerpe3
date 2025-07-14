@@ -534,6 +534,8 @@ ggplot() +
                 y = unlist(tibec.14.22.pg.apn.1.fit$Model$CG$bt.par[3:11])))+ 
   geom_line(aes(x = 1:9,
                 y =  fit7$par[1:9]), col = 'red') + 
+    geom_line(aes(x = 1:9,
+                y =  par$Rt_scaled), col = 'green') + 
   theme_bw()
 
 ```

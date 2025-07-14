@@ -9,7 +9,7 @@ nR = length(dat$u)
 
 I = matrix(0, nrow = nT, ncol = nR)
 for (j in 1:nR) {
-  I[dat$u[j]:nT, j] <- 1
+  I[(dat$u[j]-1):nT, j] <- 1
 }
 
 dat$I = I
@@ -118,7 +118,7 @@ ggplot() +
   theme_bw()
 
 
-testador(par = c(log(par_cd$M),
+par = c(log(par_cd$M),
                  log(par_cd$N0),
                  log(par_cd$P1.Pelagic),
                  log(par_cd$P2.Pelagic),
@@ -133,19 +133,16 @@ testador(par = c(log(par_cd$M),
                  log(par_cd$alpha.Pelagic),
                  log(par_cd$beta.Pelagic),
                  0.25*sd(tibec.14.22.pg.2$Data$Pelagic$obscat.thou[tibec.14.22.pg.2$Data$Pelagic$obscat.thou>0])^2,
-                 0.25*sd(log(tibec.14.22.pg.2$Data$Pelagic$obscat.thou[tibec.14.22.pg.2$Data$Pelagic$obscat.thou>0]))^2),
-         dates = tibec.14.22.pg.dates.1,
-         obscat1 = Ct,
-         obseff1 = Et,
-         obsmbm1 = tibec.14.22.pg.1[,5],
-         output = 'no',
-         partial = F)
+                 0.25*sd(log(tibec.14.22.pg.2$Data$Pelagic$obscat.thou[tibec.14.22.pg.2$Data$Pelagic$obscat.thou>0]))^2)
+         dates = tibec.14.22.pg.dates.1
+         obscat1 = Ct
+         obseff1 = Et
+         obsmbm1 = tibec.14.22.pg.1[,5]
+
 
 # funcao extraida
 # 
-testador = function (par, dates, obscat1, obseff1, obsmbm1, distr, properties, 
-                     output, pp = 9, partial) 
-{
+
   ts.start <- head(dates, 1)
   ts.P1 <- dates[2]
   ts.P2 <- dates[3]
@@ -212,23 +209,43 @@ testador = function (par, dates, obscat1, obseff1, obsmbm1, distr, properties,
   effn1 <- nstep^(exp(logbeta))
   predcat1 <- exp(logscale) * (effeff1 * effn1) * exp(-exp(logM)/2)
   
-  
-  
-  Likel <- .CatDynLik1F(obscat1, predcat1, distr, par)
-  if (output == "predict") {
-    catdynexp <- .CatDynExp1F.Res(properties, nstep, obsmbm1, 
-                                  pp, dates, distr, par, Likel, ts.start, ts.end, obseff1, 
-                                  obscat1, predcat1, partial)
-    class(catdynexp) <- "CatDynExp"
-    return(catdynexp)
-  }
-  else {
-    if (distr == "apnormal" | distr == "aplnormal") {
-      negsup <- ((sealen - 2)/2) * log(sum(Likel[["Likelihood"]]))
-    }
-    else {
-      negsup <- -sum(Likel[["Likelihood"]])
-    }
-    return(negsup)
-  }
+predcat1/catch_cat
+# formula de forma mais compacta, em termos RTMB
+
+
+comprimento = length(Ct)
+nstep <- vector("numeric", comprimento) #init vector
+mccum = vector("numeric", comprimento)
+effeff1 = vector("numeric", comprimento)
+effn1 = vector("numeric", comprimento)
+predcat2 = vector("numeric", comprimento)
+
+N0 = exp(logN0)
+M = exp(logM)
+k = exp(logK)
+beta = exp(logbeta)
+alpha = exp(logalpha)
+
+mccum[1] = 0
+nstep[1] <- N0 * exp(-M)
+for(i in 2:comprimento){
+  mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
+  nstep[i] = N0 * exp(-M*i) + 
+    sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+    mccum[i] * exp(-M/2)
+  effeff1 <- Et^(alpha)
+  effn1 <- nstep^(beta)
+  predcat <- k * (effeff1 * effn1) * exp(-M/2)
 }
+
+predcat2/predcat1
+
+ggplot() + 
+  geom_line(aes(x = 1:108,
+                y = catch_cat)) + 
+  # geom_line(aes(x = 1:108,
+  # y = rnorm(108,catch,sdCt)), col = 'red') + 
+  geom_line(aes(x = 1:108,
+                y = predcat2), col = 'green') + 
+  theme_bw()
+
