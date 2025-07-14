@@ -291,7 +291,7 @@ I = list()
 for(i in 1:length(indice_manual)){
   I[[i]] = rep(1,length(dat$Ct))
   # I[[i]][1:length(I[[i]])<indice_manual[i]] = 0
-  I[[i]][1:indice_manual[i]] <- 0
+  I[[i]][1:indice_manual[i]-1] <- 0
 }
 
 dat$u = unlist(indice_manual)
@@ -411,7 +411,7 @@ nR = length(dat$u)
 
 I = matrix(0, nrow = nT, ncol = nR)
 for (j in 1:nR) {
-  I[dat$u[j]:nT, j] <- 1
+  I[(dat$u[j]-1):nT, j] <- 1 # -1 foi adicionado para ficar consistente com CatDyn.
 }
 
 dat$I = I
@@ -451,54 +451,39 @@ jnll = function(par) {
 
   jnll = 0
   # Initialize predicted catch and biomass
-  nT     = length(Ct)
-  catch = rep(0, nT) * alpha   # Ensures catch becomes an AD type
-  Bt = rep(0, nT) * alpha     # Ensures Bt becomes an AD type
 
- 
-  # Forward simulation of catch and biomass
-    for(mes in 1:length(Ct)){
-    # core
-      if(mes == 1){
-       # start biomass at N0
-      Bt[mes]  = N0
-      
-    }else{
-      
-           # M-driven decay
-      
-      part1 = N0*exp(-M*mes)
-      
-      
-      part2 = 0
-      
-      for(mes_ant in 1:(mes-1)){
-        part2 = part2 + catch[mes_ant]*exp(-M*(mes-mes_ant-1))}
-      
-      
-      # Recruitment pulses
-      
-      part3 = 0
-          part3 = sum(I_mat[mes,] * Rt)
-        # part3 = part3 + I[[j]][mes] * Rt[j]*exp(-M*(mes-u[j]))}
-      
-      part4 = 0
-      
-      # Assemble
-      Bt[mes] = part1 - m * part2 + part3 - part4}
-    
-      pred =  K*Et[mes]^alpha * m * (Bt[mes])^beta
-      catch[mes] = pred
-   }
+
+  #comprimento = length(Ct)
+nstep <- vector("numeric", comprimento) * alpha#init vector
+mccum = vector("numeric", comprimento) * alpha
+effeff1 = vector("numeric", comprimento) * alpha
+effn1 = vector("numeric", comprimento) * alpha
+predcat2 = vector("numeric", comprimento) * alpha
+
+N0 = exp(logN0)
+M = exp(logM)
+k = exp(logK)
+beta = exp(logbeta)
+alpha = exp(logalpha)
+
+  mccum[1] = 0
+  nstep[1] <- N0 * exp(-M)
+  for(i in 2:comprimento){
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
+    nstep[i] = N0 * exp(-M*i) + 
+      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+      mccum[i] * exp(-M/2)
+    effeff1 <- Et^(alpha)
+    effn1 <- nstep^(beta)
+    predcat <- k * (effeff1 * effn1) * exp(-M/2)
+  }
   
   # Negative log-likelihood
-  jnll = -sum(dnorm(Ct, mean = catch, sd = sdCt, log = TRUE))
-  if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
-  REPORT(catch)
-  REPORT(Bt)
-  REPORT(Rt)
-  REPORT(N0)
+  jnll = -sum(dnorm(Ct, mean = predcat, sd = sdCt, log = TRUE))
+  # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
+    REPORT(predcat)
   jnll
+
 }
 
 
@@ -506,7 +491,7 @@ jnll = function(par) {
 # quick test: do we get a number? This number should be a likelihood.
 jnll(par)
 
-obj7 = MakeADFun(jnll, par, random = c("Rt_scaled"))
+obj7 = MakeADFun(jnll, par)
 
 # Set bounds
 lower <- list(
@@ -527,10 +512,8 @@ fit7 = nlminb(obj7$par, obj7$fn, obj7$gr,
   upper = unlist(upper))
 
 # Retrieve predicted catch
-predicted_catch = obj7$report()$catch
-predicted_Bt = obj7$report()$Bt
-predicted_N0 = obj7$report()$N0
-predicted_Rt = obj7$report()$Rt
+predicted_catch = obj7$report()$predcat
+
 ```
 
 ```{r}
@@ -545,7 +528,31 @@ ggplot() +
                 y = predicted_catch), col = 'red') + 
   theme_bw()
 
+
+ggplot() + 
+  geom_line(aes(x = 1:9,
+                y = unlist(tibec.14.22.pg.apn.1.fit$Model$CG$bt.par[3:11])))+ 
+  geom_line(aes(x = 1:9,
+                y =  fit7$par[1:9]), col = 'red') + 
+  theme_bw()
+
 ```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 \todo[inline]{NaN warnings were also produced here}
