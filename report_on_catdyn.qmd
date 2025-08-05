@@ -1,0 +1,1136 @@
+---
+title: "Polvices polvando polvivamente"
+format:
+   pdf:
+       include-in-header:
+           - text: |
+                \usepackage{todonotes}
+                \usepackage{graphicx}
+                \usepackage{amsmath}
+                \usepackage{fvextra}
+                \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+editor: source
+documentclass: asaproc
+tbl-cap-location: top
+classoption: 11pt
+cite-method: biblatex
+bibliography: Polvices.bib
+biblatexoptions: 
+  - citestyle=authoryear
+author:
+  - name: "Alberto Rocha \\thanks{Instituto Português do Mar e da Atmosfera}"
+    corresponding: true
+  - name: "Ana Moreno \\thanks{Instituto Português do Mar e da Atmosfera}"
+    corresponding: false
+number-sections: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+#| eval: false
+#| echo: false
+tinytex::parse_install("report.log")
+tinytex::tlmgr_update()
+
+
+# https://cameronpatrick.com/post/2023/07/quarto-thesis-formatting/
+```
+
+```{r setup}
+#| include: false
+
+library(gridExtra)
+library(CatDyn)
+library(RTMB)
+library(wesanderson)
+library(tidyverse)
+library(xtable)
+library(tmbstan)
+library(shinystan)
+library(optimx)
+
+source('scripts/custom_catdyn_fit.R')
+source('scripts/custom_catdyn_bsd.R')
+source('scripts/funcoes_catdyn.R')
+source('WS/CatDynBSD9P.R')
+
+load("data/df_effort_m_mbw_otb.Rdata")
+load('data/mbw_model.Rdata')
+
+mod_aux = lm(df_effort$catch ~ df_effort$effort)
+
+# Fix a couple of outliers
+df_effort = 
+  df_effort %>% 
+  mutate(catch = case_when(year_sale == 2005 &
+                             month_sale == '09' ~
+                             effort * mod_aux$coefficients[2] +
+                             mod_aux$coefficients[1],
+                           T ~ catch),
+         catch_otb = case_when(year_sale == 2005 &
+                                 month_sale == '09' ~
+                                 effort_otb * mod_aux$coefficients[2] +
+                                 mod_aux$coefficients[1],
+                               T ~ catch_otb)) %>% 
+  mutate(catch_otb = case_when(catch_otb == 0 ~ mean(catch_otb), 
+                               T ~ catch_otb),
+         effort_otb = case_when(effort_otb  < 150 ~ mean(effort_otb),
+                                T ~ effort_otb))
+
+# function for manual catdyn report
+report_manual = function(p, method, dates,
+                         distr, fleet.name, par.tmp,
+                         opt_result){
+  results2 = vector("list", length(method))
+      names(results2) = method
+      temp = attr(opt_result, "details")
+      for (i in 1:length(method)) {
+        results2[[i]]$Type <- p
+        results2[[i]]$Dates <- dates
+        names(results2[[i]]$Dates) <- c("ts.start",
+                                        paste0('ts.', seq(1:p)),
+                                        "ts.end")
+        results2[[i]]$Distr <- distr
+        par.names <- c("M", "N0", paste0('P', seq(1:p), ".", rep(fleet.name,p)),
+                       paste(c("k.", "alpha.", "beta."), fleet.name, sep = ""))
+        
+        if (distr %in% c("negbin", "normal" ,
+                         "lognormal",  "gamma",
+                         "roblognormal", "gumbel")) {
+          par.names <- c(par.names, paste("psi.", fleet.name, 
+            sep = ""))
+        }
+        
+        results2[[i]]$converg <- "FAIL"
+        results2[[i]]$kkt <- NA
+        results2[[i]]$AIC <- NA
+        results2[[i]]$bt.par <- NA
+        results2[[i]]$num.grads <- NA
+        results2[[i]]$bt.stdev <- NA
+        results2[[i]]$Cor <- matrix(NA, length(par.names), 
+          length(par.names))
+        
+        if (length(temp[i, ]$ngatend) == length(par.names) & 
+          !any(is.na(temp[i, ]$nhatend)) & 1/kappa(temp[i, 
+          ]$nhatend) > 1e-15) {
+          results2[[i]]$converg <- opt_result[i, length(par.tmp) + 
+            5]
+          results2[[i]]$kkt <- opt_result[i, (length(par.tmp) + 
+            6):(length(par.tmp) + 7)]
+          results2[[i]]$AIC <- 2 * length(par.tmp) + 2 * 
+            opt_result[i, length(par.tmp) + 1]
+          results2[[i]]$bt.par <- exp(opt_result[i, (1:length(par.tmp))])
+          results2[[i]]$num.grads <- temp[i, ]$ngatend
+          
+          v <- matrix(0, length(par.names), length(par.names))
+          
+          if (distr %in% c("poisson",  "apnormal", "aplnormal")) {
+            v <- deltamethod(
+    g = lapply(paste0('~exp(x', 1:length((par.tmp)-1), ')'), as.formula),
+    mean = as.numeric(opt_result[i, 1:length((par.tmp)-1)]),
+    cov = try(solve(temp[i, ]$nhatend)),
+    ses = FALSE
+)
+          }
+          else {
+            v <- deltamethod(
+            g = lapply(paste0('~exp(x', seq_along(par.tmp), ')'), as.formula),
+            mean = as.numeric(opt_result[i, 1:length(par.tmp)]),
+            cov = try(solve(temp[i, ]$nhatend)),
+            ses = FALSE
+)
+          }
+          results2[[i]]$bt.stdev <- sqrt(diag(v))
+          results2[[i]]$Cor <- cor(v)
+          names(results2[[i]]$num.grads) <- par.names
+          names(results2[[i]]$bt.par) <- par.names
+          names(results2[[i]]$bt.stdev) <- par.names
+          colnames(results2[[i]]$Cor) <- par.names
+          rownames(results2[[i]]$Cor) <- par.names
+                    }}
+        return(results2)}      
+```
+
+- Default order is $M$, $N_0$, $R_t$, $k$, $\alpha$, $\beta$ and $\psi$
+
+# Blue Shark Example
+
+## CatDyn (Example from Workshop)
+
+```{r}
+
+#| results: hide
+tibec.14.22.pg.1 <- read.csv("WS/tibec.14.22.pg.1.csv",header=TRUE)
+
+tibec.14.22.pg.2 <- as.CatDynData(x=tibec.14.22.pg.1,
+                                  step="month",
+                                  fleet.name=c("Pelagic"),
+                                  coleff=4,
+                                  colcat=3,
+                                  colmbw=5,
+                                  unitseff="ntrips",
+                                  unitscat="kg",
+                                  unitsmbw="kg",
+                                  nmult="thou",
+                                  season.dates=c("2014-01-01","2022-12-31"))
+
+P1.Pelagic  <- 12  #2014
+P2.Pelagic  <- 24  #2015
+P3.Pelagic  <- 36  #2016
+P4.Pelagic  <- 47  #2017 
+P5.Pelagic  <- 60  #2018 
+P6.Pelagic  <- 72  #2019
+P7.Pelagic  <- 84  #2020 
+P8.Pelagic  <- 96  #2021
+P9.Pelagic  <- 107 #2022
+#
+tibec.14.22.pg.dates.1  <- c(head(tibec.14.22.pg.2$Data[[1]]$time.step,1),
+                             P1.Pelagic,
+                             P2.Pelagic,
+                             P3.Pelagic,
+                             P4.Pelagic,
+                             P5.Pelagic,
+                             P6.Pelagic,
+                             P7.Pelagic,
+                             P8.Pelagic,
+                             P9.Pelagic,
+                             tail(tibec.14.22.pg.2$Data[[1]]$time.step,1))
+
+M.ini             <- 0.015
+N0.ini            <- 500
+P1.ini.Pelagic    <- 100 #12  2014
+P2.ini.Pelagic    <- 50  #24  2015
+P3.ini.Pelagic    <- 50  #36  2016
+P4.ini.Pelagic    <- 50  #47  2017
+P5.ini.Pelagic    <- 100 #60  2018
+P6.ini.Pelagic    <- 60  #72  2019
+P7.ini.Pelagic    <- 350 #84  2020
+P8.ini.Pelagic    <- 150 #96  2021
+P9.ini.Pelagic    <- 150 #107 2022
+k.ini.Pelagic     <- 2e-6
+alpha.ini.Pelagic <- 1
+beta.ini.Pelagic  <- 1
+#
+psi.ini.Pelagic    <- 0.25*sd(tibec.14.22.pg.2$Data$Pelagic$obscat.thou[tibec.14.22.pg.2$Data$Pelagic$obscat.thou>0])^2
+psilog.ini.Pelagic <- 0.25*sd(log(tibec.14.22.pg.2$Data$Pelagic$obscat.thou[tibec.14.22.pg.2$Data$Pelagic$obscat.thou>0]))^2
+
+tibec.14.22.pg.pars.ini <- log(c(M.ini,
+                                 N0.ini,
+                                 P1.ini.Pelagic,
+                                 P2.ini.Pelagic,
+                                 P3.ini.Pelagic,
+                                 P4.ini.Pelagic,
+                                 P5.ini.Pelagic,
+                                 P6.ini.Pelagic,
+                                 P7.ini.Pelagic,
+                                 P8.ini.Pelagic,
+                                 P9.ini.Pelagic,
+                                 k.ini.Pelagic,
+                                 alpha.ini.Pelagic,
+                                 beta.ini.Pelagic,
+                                 psi.ini.Pelagic))
+#
+
+
+
+tibec.14.22.pg.ini.apn <- catdynexp(x=tibec.14.22.pg.2,                                 
+                                    p=9,
+                                    par=tibec.14.22.pg.pars.ini[1:15],
+                                    dates=tibec.14.22.pg.dates.1,
+                                    distr="normal")
+
+plot(x=tibec.14.22.pg.ini.apn,
+     leg.pos="topleft",
+     Biom.tstep=1,
+     Biom.xpos=0.25,
+     Biom.ypos=0.75,
+     Cat.tstep=12,
+     Cat.xpos=0.25,
+     Cat.ypos=0.65)
+#
+tibec.14.22.pg.apn.1.fit <- CatDynFit(x=tibec.14.22.pg.2,
+                                      p=9,
+                                      par=tibec.14.22.pg.pars.ini[1:15],
+                                      dates=tibec.14.22.pg.dates.1,
+                                      distr="normal",
+                                      method=c("CG"),
+                                      itnmax=50000)
+#
+tibec.14.22.pg.apn.1.fit.pred.CG <- CatDynPred(x=tibec.14.22.pg.apn.1.fit,method="CG")
+
+x                        <- data.frame(key=rep(1:12,9),
+                                       x=tibec.14.22.pg.2$Data$Pelagic$obsmbw.kg)
+y                        <- aggregate(x$x,list(x$key),sd)
+tibec.14.22.pg.apn.1.bsd <- CatDynBSD9P(x=tibec.14.22.pg.apn.1.fit,
+                                        method="CG",
+                                        multi=TRUE,
+                                        mbw.sd=y$x)
+
+annual_biomass =
+tibec.14.22.pg.apn.1.bsd %>% 
+  mutate(TimeStep = 108,
+         x =seq(2014,2022+11/12,1/12))
+```
+
+## RTMB
+
+```{r}
+#| results: hide
+
+dat = list()
+dat$Ct = as.vector(tibec.14.22.pg.2$Data$Pelagic$obscat.thou)         # observed catch
+dat$Et = as.vector(tibec.14.22.pg.2$Data$Pelagic$obseff.ntrips)       # effort
+dat$u = c(12, 24, 36, 47, 60, 72, 84, 96, 107)                        # recruitment pulse months
+nT = length(dat$Ct)
+nR = length(dat$u)
+
+
+I = matrix(0, nrow = nT, ncol = nR)
+for (j in 1:nR) {
+  I[(dat$u[j]-1):nT, j] <- 1 # -1 foi adicionado para ficar consistente com CatDyn.
+}
+
+dat$I = I
+
+# Initial parameter values
+par = list(
+  logM          = log(M.ini),
+  logN0         = log(N0.ini),
+  Rt_scaled     = log(c(P1.ini.Pelagic,P2.ini.Pelagic,
+                        P3.ini.Pelagic,P4.ini.Pelagic,
+                        P5.ini.Pelagic, P6.ini.Pelagic,
+                        P7.ini.Pelagic, P8.ini.Pelagic,
+                        P9.ini.Pelagic)),
+  logK          = log(k.ini.Pelagic),
+  logalpha      = log(alpha.ini.Pelagic),
+  logbeta       = log(beta.ini.Pelagic),
+  logsdCt       = log(psi.ini.Pelagic)
+)
+
+
+Rt_min = 0      # recruitment can't be negative
+Rt_max = 1e5    # or some upper limit from prior data or biomass capacit
+
+# initialize joint negative loglikelihood function
+
+jnll = function(par) {
+  getAll(par, dat)
+
+  # Extract parameters
+  Ct     = OBS(Ct)
+  Et     = OBS(Et)
+  I_mat  = OBS(I)
+  alpha  = exp(logalpha)
+  beta   = exp(logbeta)
+  K      = exp(logK)
+  N0     = exp(logN0)
+  M      = exp(logM)
+  sdCt   = exp(logsdCt)
+  Rt     = exp(Rt_scaled)
+
+  jnll = 0
+  # Initialize predicted catch and biomass
+
+
+  #comprimento = length(Ct)
+nstep <- vector("numeric", nT) * alpha#init vector
+mccum = vector("numeric", nT) * alpha
+effeff1 = vector("numeric", nT) * alpha
+effn1 = vector("numeric", nT) * alpha
+predcat2 = vector("numeric", nT) * alpha
+
+N0 = exp(logN0)
+M = exp(logM)
+k = exp(logK)
+beta = exp(logbeta)
+alpha = exp(logalpha)
+
+  mccum[1] = 0
+  nstep[1] <- N0 * exp(-M)
+  for(i in 2:nT){
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
+    nstep[i] = N0 * exp(-M*i) + 
+      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+      mccum[i] * exp(-M/2)
+    effeff1 <- Et^(alpha)
+    effn1 <- nstep^(beta)
+    predcat <- k * (effeff1 * effn1) * exp(-M/2)
+  }
+  
+  # Negative log-likelihood
+  jnll = -sum(dnorm(Ct, mean = predcat, sd = sdCt, log = TRUE))
+  # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
+    REPORT(predcat)
+  jnll
+
+}
+
+
+
+# quick test: do we get a number? This number should be a likelihood.
+jnll(par)
+
+obj7 = MakeADFun(jnll, par)
+
+# Set bounds
+lower <- list(
+  Rt_scaled = rep(Rt_min, 9),
+  logalpha = -10, logbeta = -10, logK = -10,
+  logN0_scaled = -10, logM = -10, logsdCt = -10
+)
+
+upper <- list(
+  Rt_scaled = rep(Rt_max, 9),
+  logalpha = 10, logbeta = 10, logK = 10,
+  logN0_scaled = 10, logM = 10, logsdCt = 10
+)
+
+# Run optimizer
+fit7 = nlminb(obj7$par, obj7$fn, obj7$gr,
+  # lower = unlist(lower),
+  # upper = unlist(upper),
+  control = list(iter.max = 50000))
+
+# CG7 <- optim(
+#   par = obj7$par,
+#   fn = obj7$fn,
+#   gr = obj7$gr,
+#   method = "CG",
+#   control = list(maxit = 1000))
+
+# gradient was set to NULL to match CatDyn approach
+CG7 = optimx(par = obj7$par,
+             fn = obj7$fn,
+             gr = NULL,
+             method = 'CG',
+             output = 'estimate',
+             hessian = T,
+             itnmax = 50000)
+
+# report from catdyn
+tibec.14.22.pg.apn.1.fit$Model$CG
+
+# report from RTMB
+report_manual(p = 9,
+              method = 'CG',
+              opt_result = CG7,
+              dates=tibec.14.22.pg.dates.1,
+              distr = 'normal',
+              fleet.name = tibec.14.22.pg.2$Properties$Fleets$Fleet,
+              par.tmp = tibec.14.22.pg.pars.ini)
+
+# Retrieve predicted catch
+predicted_catch = obj7$report()$predcat
+
+```
+
+## Results and Comparison
+
+```{r}
+#| output: asis
+#| echo: false
+
+cat_pars_1 = tibec.14.22.pg.apn.1.fit$Model$CG$bt.par
+
+xtable(data.frame(
+                  alpha = c(cat_pars_1$alpha.Pelagic, exp(fit7$par['logalpha']), exp(CG7['logalpha']) %>% unlist),
+                  beta = c(cat_pars_1$beta.Pelagic, exp(fit7$par['logbeta']), exp(CG7['logbeta'])%>% unlist),
+                  k = c(cat_pars_1$k.Pelagic, exp(fit7$par['logK']), exp(CG7['logK'])%>% unlist),
+                  M = c(cat_pars_1$M, exp(fit7$par['logM']), exp(CG7['logM'])%>% unlist),
+                  N0 = c(cat_pars_1$N0, exp(fit7$par['logN0']), exp(CG7['logN0'])%>% unlist),
+                  SD_Ct = c(cat_pars_1$psi.Pelagic, exp(fit7$par["logsdCt"]), exp(CG7["logsdCt"])%>% unlist),
+                  R1 = c(cat_pars_1$P1.Pelagic,fit7$par[3],CG7[3]%>% unlist %>% exp),
+                  R2 = c(cat_pars_1$P2.Pelagic,fit7$par[4],CG7[4]%>% unlist %>% exp),
+                  R3 = c(cat_pars_1$P3.Pelagic,fit7$par[5],CG7[5]%>% unlist %>% exp),
+                  R4 = c(cat_pars_1$P4.Pelagic,fit7$par[6],CG7[6]%>% unlist %>% exp),
+                  R5 = c(cat_pars_1$P5.Pelagic,fit7$par[7],CG7[7]%>% unlist %>% exp),
+                  R6 = c(cat_pars_1$P6.Pelagic,fit7$par[8],CG7[8]%>% unlist %>% exp),
+                  R7 = c(cat_pars_1$P7.Pelagic,fit7$par[9],CG7[9]%>% unlist %>% exp),
+                  R8 = c(cat_pars_1$P8.Pelagic,fit7$par[10],CG7[10]%>% unlist %>% exp),
+                  R9 = c(cat_pars_1$P9.Pelagic,fit7$par[11],CG7[11]%>% unlist %>% exp),
+                  row.names = c('CatDyn','RTMB', 'RTMB_CG')) %>% t, digits = 8) %>% 
+  print(comment = F,
+        sanitize.text.function = function(x)
+          {gsub("_", "\\\\_", x)})
+
+
+                                
+check_1cat = 
+catdynexp(x=tibec.14.22.pg.2,                                 
+      p=9,
+      par=log(c(cat_pars_1$M,
+      cat_pars_1$N0,
+      cat_pars_1$P1.Pelagic,
+      cat_pars_1$P2.Pelagic,
+      cat_pars_1$P3.Pelagic,
+      cat_pars_1$P4.Pelagic,
+      cat_pars_1$P5.Pelagic,
+      cat_pars_1$P6.Pelagic,
+      cat_pars_1$P7.Pelagic,
+      cat_pars_1$P8.Pelagic,
+      cat_pars_1$P9.Pelagic,
+      cat_pars_1$k.Pelagic,
+      cat_pars_1$alpha.Pelagic,
+      cat_pars_1$beta.Pelagic,
+      cat_pars_1$psi.Pelagic)),
+      dates=tibec.14.22.pg.dates.1,
+      distr="normal")
+
+check_2cat = 
+catdynexp(x=tibec.14.22.pg.2,                                 
+      p=9,
+      par=log(c(exp(fit7$par['logM']),
+      exp(fit7$par['logN0']),
+      fit7$par[1]%>% exp,
+      fit7$par[2]%>% exp,
+      fit7$par[3]%>% exp,
+      fit7$par[4]%>% exp,
+      fit7$par[5]%>% exp,
+      fit7$par[6]%>% exp,
+      fit7$par[7]%>% exp,
+      fit7$par[8]%>% exp,
+      fit7$par[9]%>% exp,
+      exp(fit7$par['logK']),
+      exp(fit7$par['logalpha']),
+      exp(fit7$par['logbeta']),
+      exp(fit7$par['logsdCt']))),
+      dates=tibec.14.22.pg.dates.1,
+      distr="normal")
+
+ggplot() + 
+  geom_line(aes(x = 1:108,
+                y = check_1cat$Model$Results$Predicted.Catch.thou)) + 
+  geom_line(aes(x = 1:108,
+                y = check_2cat$Model$Results$Predicted.Catch.thou), col = 'red') + 
+  theme_bw() + 
+  labs(y = 'catch', title = 'Catdyn (black), RTMB (red)')
+
+```
+
+```{r}
+# tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results['Predicted.Catch.thou']
+# catch
+
+grid.arrange(
+
+ggplot() + 
+  geom_line(aes(x = 1:108,
+                y = unlist(tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results['Predicted.Catch.thou']))) + 
+  geom_line(aes(x = 1:108,
+                y = predicted_catch), col = 'red') + 
+  theme_bw() + 
+  labs(y = 'catch', title = 'Catdyn (black), RTMB (red)')
+,
+
+ggplot() + 
+  geom_line(aes(x = 1:9,
+                y = unlist(tibec.14.22.pg.apn.1.fit$Model$CG$bt.par[3:11])))+ 
+  geom_line(aes(x = 1:9,
+                y =  exp(fit7$par[1:9])), col = 'red') + 
+    geom_line(aes(x = 1:9,
+                y =  exp(par$Rt_scaled)), col = 'green') + 
+  theme_bw()+ 
+    labs(y = 'Recruitment', title = 'Catdyn (black), RTMB (red), Starting values (green)'),
+ncol=1)
+
+```
+
+# Lobster Example
+
+## CatDyn (Example from Workshop)
+
+```{r}
+cateff1.Crusoe <- read.csv("WS/RobinsonCrusoeLobster.csv",header=TRUE)
+#
+################################################################################
+# 2.- Stock assessment                                                         #
+################################################################################
+#
+################################################################################
+# 2.1.- Robinson Crusoe                                                        #
+################################################################################
+#
+################################################################################
+# 2.1.1.- Depletion models season: 2002-2003                                   #
+################################################################################
+#
+# Data object
+jflcrusoe0203  <- as.CatDynData(x=cateff1.Crusoe[cateff1.Crusoe$Season==1,],
+                                step="week",
+                                fleet.name="nasas",
+                                coleff=4,
+                                colcat=5,
+                                colmbw=6,
+                                unitseff="ndays",
+                                unitscat="kg",
+                                unitsmbw="g",
+                                nmult="thou",
+                                season.dates=c("2002-09-28","2003-05-22"))
+#
+# plot(x=jflcrusoe0203,mark=TRUE,offset=c(9,10),hem="S")                          # 43 51 candidate input weeks
+#
+# Initial values for 2 input depletion variant
+M.ini       <- 10*0.001937482
+N0.ini      <- 5*9.210188
+P1.ini      <- 45
+P2.ini      <- 20
+k.ini       <- 8.5e-4                                                           # always between 1e-3 and 1e-6
+alpha.ini   <- 1                                                                # always close to 1
+beta.ini    <- 1                                                                # always close to 1
+psi.ini = 0.25*sd(jflcrusoe0203$Data$nasas$obscat.thou[jflcrusoe0203$Data$nasas$obscat.thou>0])^2
+pars.ini.2P <- log(c(M.ini,N0.ini,P1.ini,P2.ini,k.ini,alpha.ini,beta.ini, psi.ini))
+#
+dates.2P    <- c(head(jflcrusoe0203$Data$nasas$time.step,1),                   # now the dates vector also has
+                 41,
+                 49,                                                            # the week of one input of abundance
+                 tail(jflcrusoe0203$Data$nasas$time.step,1))
+#
+jfldesvent1112.2P.apn.ini <- catdynexp(x=jflcrusoe0203,
+                                       p=2,
+                                       par=pars.ini.2P,
+                                       dates=dates.2P,
+                                       distr="normal")
+#
+
+
+jfldesvent1112.2P.1.apn.fit  <- CatDynFit(x=jflcrusoe0203,
+                                          p=2,
+                                          par=pars.ini.2P,
+                                          dates=dates.2P,
+                                          distr="normal",
+                                          method=c("spg","CG","Nelder-Mead"),
+                                          itnmax=50000)
+
+
+```
+
+## RTMB
+
+```{r}
+#| results: hide
+
+dat = list()
+dat$Ct = as.vector(jflcrusoe0203$Data$nasas$obscat.thou)         # observed catch
+dat$Et = as.vector(jflcrusoe0203$Data$nasas$obseff.ndays)       # effort
+dat$u = c(41,49) - jflcrusoe0203$Data$nasas$time.step[1] + 1                       # recruitment pulse months
+nT = length(dat$Ct)
+nR = length(dat$u)
+
+
+I = matrix(0, nrow = nT, ncol = nR)
+for (j in 1:nR) {
+  I[(dat$u[j]-1):nT, j] <- 1 # -1 foi adicionado para ficar consistente com CatDyn.
+}
+
+dat$I = I
+
+# Initial parameter values
+par = list(
+  logM          = log(M.ini),
+  logN0         = log(N0.ini),
+  Rt_scaled     = log(c(45,20)),
+  logK          = log(k.ini),
+  logalpha      = log(1),
+  logbeta       = log(1),
+  logsdCt       = log(psi.ini)  # consistent with CatDyn
+)
+
+
+Rt_min = 0      # recruitment can't be negative
+Rt_max = 1e5    # or some upper limit from prior data or biomass capacit
+
+# initialize joint negative loglikelihood function
+
+jnll = function(par) {
+  getAll(par, dat)
+
+  # Extract parameters
+  Ct     = OBS(Ct)
+  Et     = OBS(Et)
+  I_mat  = OBS(I)
+  alpha  = exp(logalpha)
+  beta   = exp(logbeta)
+  K      = exp(logK)
+  N0     = exp(logN0)
+  M      = exp(logM)
+  sdCt   = exp(logsdCt)
+  Rt     = exp(Rt_scaled)
+
+  jnll = 0
+  # Initialize predicted catch and biomass
+
+
+  #comprimento = length(Ct)
+nstep <- vector("numeric", nT) * alpha#init vector
+mccum = vector("numeric", nT) * alpha
+effeff1 = vector("numeric", nT) * alpha
+effn1 = vector("numeric", nT) * alpha
+predcat2 = vector("numeric", nT) * alpha
+
+N0 = exp(logN0)
+M = exp(logM)
+k = exp(logK)
+beta = exp(logbeta)
+alpha = exp(logalpha)
+
+  mccum[1] = 0
+  nstep[1] <- N0 * exp(-M)
+  for(i in 2:nT){
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
+    nstep[i] = N0 * exp(-M*i) + 
+      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+      mccum[i] * exp(-M/2)
+    effeff1 <- Et^(alpha)
+    effn1 <- nstep^(beta)
+    predcat <- k * (effeff1 * effn1) * exp(-M/2)
+  }
+  
+  # Negative log-likelihood
+  jnll = -sum(dnorm(Ct, mean = predcat, sd = sdCt, log = TRUE))
+  # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
+    REPORT(predcat)
+  jnll
+
+}
+
+
+
+# quick test: do we get a number? This number should be a likelihood.
+jnll(par)
+
+
+obj2= MakeADFun(jnll, par)
+
+# Set bounds
+# lower <- list(
+#   Rt_scaled = rep(Rt_min, 9),
+#   logalpha = -10, logbeta = -10, logK = -10,
+#   logN0_scaled = -10, logM = -10, logsdCt = -10
+# )
+# 
+# upper <- list(
+#   Rt_scaled = rep(Rt_max, 9),
+#   logalpha = 10, logbeta = 10, logK = 10,
+#   logN0_scaled = 10, logM = 10, logsdCt = 10
+# )
+
+# Run optimizer
+fit2 = nlminb(obj2$par, obj2$fn, obj2$gr,
+  # lower = unlist(lower),
+  # upper = unlist(upper),
+  control = list(iter.max = 50000))
+
+# CG7 <- optim(
+#   par = obj7$par,
+#   fn = obj7$fn,
+#   gr = obj7$gr,
+#   method = "CG",
+#   control = list(maxit = 1000))
+
+# gradient was set to NULL to match CatDyn approach
+CG2 = optimx(par = obj2$par,
+             fn = obj2$fn,
+             gr = NULL,
+             method = 'CG',
+             output = 'estimate',
+             hessian = T,
+             itnmax = 50000)
+
+# report from catdyn
+jfldesvent1112.2P.1.apn.fit$Model$CG
+jfldesvent1112.2P.1.apn.fit
+
+# report from RTMB
+report_manual(p = 2,
+              method = 'CG',
+              opt_result = CG2,
+              dates=dates.2P,
+              distr = 'normal',
+              fleet.name = jflcrusoe0203$Properties$Fleets$Fleet,
+              par.tmp = pars.ini.2P)
+
+# Retrieve predicted catch
+predicted_catch_2 = obj2$report()$predcat
+
+```
+
+## Results Comparison
+
+```{r}
+#| include: false
+
+report_2 = report_manual(p = 2,
+              method = 'CG',
+              opt_result = CG2,
+              dates=dates.2P,
+              distr = 'normal',
+              fleet.name = jflcrusoe0203$Properties$Fleets$Fleet,
+              par.tmp = pars.ini.2P)
+
+jfldesvent1112.2P.1.apn.fit$Model$CG$bt.par
+
+
+report_2$CG$bt.par
+
+```
+
+```{r}
+#| output: asis
+#| echo: false
+
+cat_pars_2 = jfldesvent1112.2P.1.apn.fit$Model$CG$bt.par
+
+xtable(data.frame(
+                  alpha = c(cat_pars_2$alpha.nasas, exp(fit2$par['logalpha']), exp(CG2['logalpha']) %>% unlist),
+                  beta = c(cat_pars_2$beta.nasas, exp(fit2$par['logbeta']), exp(CG2['logbeta'])%>% unlist),
+                  k = c(cat_pars_2$k.nasas, exp(fit2$par['logK']), exp(CG2['logK'])%>% unlist),
+                  M = c(cat_pars_2$M, exp(fit2$par['logM']), exp(CG2['logM'])%>% unlist),
+                  N0 = c(cat_pars_2$N0, exp(fit2$par['logN0']), exp(CG2['logN0'])%>% unlist),
+                  SD_Ct = c(cat_pars_2$psi.nasas, exp(fit2$par["logsdCt"]), exp(CG2["logsdCt"])%>% unlist),
+                  R1 = c(cat_pars_2$P1.nasas,fit2$par[1],CG2[1]%>% unlist %>% exp),
+                  R2 = c(cat_pars_2$P2.nasas,fit2$par[2],CG2[2]%>% unlist %>% exp),
+
+                  row.names = c('CatDyn','RTMB', 'RTMB_CG')) %>% t, digits = 8) %>% 
+  print(comment = F,
+        sanitize.text.function = function(x)
+          {gsub("_", "\\\\_", x)})
+
+
+                                
+ check_1cat = 
+catdynexp(x=tibec.14.22.pg.2,                                 
+      p=9,
+      par=log(c(cat_pars_1$M,
+      cat_pars_1$N0,
+      cat_pars_1$P1.Pelagic,
+      cat_pars_1$P2.Pelagic,
+      cat_pars_1$P3.Pelagic,
+      cat_pars_1$P4.Pelagic,
+      cat_pars_1$P5.Pelagic,
+      cat_pars_1$P6.Pelagic,
+      cat_pars_1$P7.Pelagic,
+      cat_pars_1$P8.Pelagic,
+      cat_pars_1$P9.Pelagic,
+      cat_pars_1$k.Pelagic,
+      cat_pars_1$alpha.Pelagic,
+      cat_pars_1$beta.Pelagic,
+      cat_pars_1$psi.Pelagic)),
+      dates=tibec.14.22.pg.dates.1,
+      distr="normal")
+
+check_2cat = 
+catdynexp(x=tibec.14.22.pg.2,                                 
+      p=9,
+      par=log(c(exp(fit7$par['logM']),
+      exp(fit7$par['logN0']),
+      fit7$par[1]%>% exp,
+      fit7$par[2]%>% exp,
+      fit7$par[3]%>% exp,
+      fit7$par[4]%>% exp,
+      fit7$par[5]%>% exp,
+      fit7$par[6]%>% exp,
+      fit7$par[7]%>% exp,
+      fit7$par[8]%>% exp,
+      fit7$par[9]%>% exp,
+      exp(fit7$par['logK']),
+      exp(fit7$par['logalpha']),
+      exp(fit7$par['logbeta']),
+      exp(fit7$par['logsdCt']))),
+      dates=tibec.14.22.pg.dates.1,
+      distr="normal")
+
+ggplot() + 
+  geom_line(aes(x = 1:108,
+                y = check_1cat$Model$Results$Predicted.Catch.thou)) + 
+  geom_line(aes(x = 1:108,
+                y = check_2cat$Model$Results$Predicted.Catch.thou), col = 'red') + 
+  theme_bw() + 
+  labs(y = 'catch', title = 'Catdyn (black), RTMB (red)')
+
+```
+
+```{r}
+# tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results['Predicted.Catch.thou']
+# catch
+
+pred_lobster = CatDynPred(jfldesvent1112.2P.1.apn.fit, method = 'CG') 
+
+grid.arrange(
+
+ggplot() + 
+  geom_line(aes(x = 1:36,
+                y = unlist(pred_lobster$Model$Results['Predicted.Catch.thou']))) + 
+  geom_line(aes(x = 1:36,
+                y = predicted_catch_2), col = 'red') + 
+  theme_bw() + 
+  labs(y = 'catch', title = 'Catdyn (black), RTMB (red)')
+,
+
+ggplot() + 
+  geom_line(aes(x = 1:2,
+                y = unlist(jfldesvent1112.2P.1.apn.fit$Model$CG$bt.par[3:4])))+ 
+  geom_line(aes(x = 1:2,
+                y =  fit2$par[1:2]), col = 'red') + 
+    geom_line(aes(x = 1:2,
+                y =  par$Rt_scaled), col = 'green') + 
+  theme_bw()+ 
+    labs(y = 'Recruitment', title = 'Catdyn (black), RTMB (red), Starting values (green)'),
+ncol=1)
+
+```
+
+
+# Octopus Example
+
+## CatDyn
+
+```{r}
+
+cat_df = as.CatDynData(x=df_effort %>%
+                         filter(as.numeric(
+                           as.character(year_sale)) %in% c(2006:2023)),
+                       step="month",
+                       fleet.name="MIS+OTB-S",
+                       coleff=6,
+                       colcat=5,
+                       colmbw=9,
+                       unitseff="trips",
+                       unitscat="kg",
+                       unitsmbw="kg",
+                       nmult="thou",
+                       season.dates=c(as.Date("2006-01-01"),
+                                      last_date_of_week(2023, 52)-1))
+
+indice_manual =
+  list(
+    10,11,12,
+    12,12,10,11,12,
+    11,10,12,7,10,
+    12,11,12,12,10)
+
+for(i in 0:(length(indice_manual)-1)){
+  indice_manual[[i+1]] = 12*i + indice_manual[[i+1]]
+}
+
+dat = list()
+dat$Ct = as.vector(cat_df$Data$`MIS+OTB-S`$obscat.thou)         # observed catch
+dat$Et = as.vector(cat_df$Data$`MIS+OTB-S`$obseff.trips)       # effort
+dat$u = unlist(indice_manual)                   # recruitment pulse months
+nT = length(dat$Ct)
+nR = length(dat$u)
+
+
+I = matrix(0, nrow = nT, ncol = nR)
+for (j in 1:nR) {
+  I[(dat$u[j]-1):nT, j] <- 1 # -1 foi adicionado para ficar consistente com CatDyn.
+}
+
+dat$I = I
+
+
+par = list(
+  logM          = log(0.01),
+  logN0_scaled  = log(60000),
+  # logRt_scaled = log(rep(50000,18)),
+  logRt_scaled = log(c(20000, 100000,20000,            #
+                20000, 20000, 20000, 50000,20000,       
+                20000, 20000, 20000, 20000, 20000,
+                20000, 20000,40000,20000,20000)),
+  logK          = log(0.00005),
+  logalpha      = log(.85),
+  logbeta       = log(.85),
+  logsdCt       = log(0.25 * sd(dat$Ct[dat$Ct > 0]))  # consistent with CatDyn
+)
+
+##################
+
+
+
+distribuicoes = c("gamma", "lognormal","normal","negbin","aplnormal", "apnormal")
+optimizadores = c('CG', 'spg', 'BFGS', 'Nelder-Mead')
+
+#first trial
+a = Sys.time()
+fit_occ =
+  trialer(cat_df,
+           p = 18,
+                M = exp(par$logM),
+                N0.ini = exp(par$logN0_scaled),
+                P = indice_manual,
+                P.ini  = as.list(exp(par$logRt_scaled)),
+                k.ini = exp(par$logK),
+                alpha.ini = exp(par$logalpha),
+                beta.ini  = exp(par$logbeta),
+                distr = distribuicoes[2],
+                method = optimizadores[1],
+                itnmax = 10000,
+                disp = list(exp(par$logsdCt)))
+b = Sys.time()
+b-a
+
+
+annual_biomass =
+  CatDynBSD(fit_occ$fit,
+            method = names(fit_occ$fit$Model),
+            multi = T,
+            mbw.sd = predicos$se.fit) %>% 
+  mutate(TimeStep = 216,
+         x =seq(2006,2023+11/12,1/12)) 
+
+catch_occ = unlist(CatDynPred(x=fit_occ$fit,method="CG")$Model$Results['Predicted.Catch.thou'])
+```
+
+```{r}
+par$logN0_scaled
+
+jnll = function(par) {
+  getAll(par, dat)
+
+  # Extract parameters
+  Ct     = OBS(Ct)
+  Et     = OBS(Et)
+  I_mat  = OBS(I)
+  alpha  = exp(logalpha)
+  beta   = exp(logbeta)
+  k      = exp(logK)
+  N0     = exp(logN0_scaled)
+  M      = exp(logM)
+  sdCt   = exp(logsdCt)
+  Rt     = exp(logRt_scaled)
+
+  jnll = 0
+  # Initialize predicted catch and biomass
+
+
+  #comprimento = length(Ct)
+nstep <- vector("numeric", nT) * alpha#init vector
+mccum = vector("numeric", nT) * alpha
+effeff1 = vector("numeric", nT) * alpha
+effn1 = vector("numeric", nT) * alpha
+predcat2 = vector("numeric", nT) * alpha
+
+# N0 = exp(logN0)
+# M = exp(logM)
+# k = exp(logK)
+# beta = exp(logbeta)
+# alpha = exp(logalpha)
+
+  mccum[1] = 0
+  nstep[1] <- N0 * exp(-M)
+  for(i in 2:nT){
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
+    nstep[i] = N0 * exp(-M*i) + 
+      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+      mccum[i] * exp(-M/2)
+    effeff1 <- Et^(alpha)
+    effn1 <- nstep^(beta)
+    predcat <- k * (effeff1 * effn1) * exp(-M/2)
+  }
+  
+  # Negative log-likelihood
+  jnll = -sum(dnorm(Ct, mean = predcat, sd = sdCt, log = TRUE))
+  # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
+    REPORT(predcat)
+  jnll
+
+}
+
+
+
+# quick test: do we get a number? This number should be a likelihood.
+jnll(par)
+
+
+obj3= MakeADFun(jnll, par)
+
+# Set bounds
+# lower <- list(
+#   Rt_scaled = rep(Rt_min, 9),
+#   logalpha = -10, logbeta = -10, logK = -10,
+#   logN0_scaled = -10, logM = -10, logsdCt = -10
+# )
+# 
+# upper <- list(
+#   Rt_scaled = rep(Rt_max, 9),
+#   logalpha = 10, logbeta = 10, logK = 10,
+#   logN0_scaled = 10, logM = 10, logsdCt = 10
+# )
+
+# Run optimizer
+fit3 = nlminb(obj3$par, obj3$fn, obj3$gr,
+  # lower = unlist(lower),
+  # upper = unlist(upper),
+  control = list(iter.max = 50000))
+
+# CG7 <- optim(
+#   par = obj7$par,
+#   fn = obj7$fn,
+#   gr = obj7$gr,
+#   method = "CG",
+#   control = list(maxit = 1000))
+
+# gradient was set to NULL to match CatDyn approach
+CG3 = optimx(par = obj3$par,
+             fn = obj3$fn,
+             gr = NULL,
+             method = 'CG',
+             output = 'estimate',
+             hessian = T,
+             itnmax = 50000)
+
+# report from catdyn
+fit_occ$fit$Model$Model$CG
+fit_occ$fit$Model
+
+# report from RTMB
+report_manual(p = 18,
+              method = 'CG',
+              opt_result = CG3,
+              dates=c(1, dat$u, nT),
+              distr = 'lognormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par)
+
+# Retrieve predicted catch
+predicted_catch_3 = obj3$report()$predcat
+```
+
+```{r}
+report_3 = report_manual(p = 18,
+              method = 'CG',
+              opt_result = CG3,
+              dates=c(1, dat$u, nT),
+              distr = 'lognormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par)
+
+fit_occ$fit$Model$CG$bt.par
+
+
+report_3$CG$bt.par
+  
+```
+
+```{r}
+#| output: asis
+#| echo: false
+
+cat_pars_3 = fit_occ$fit$Model$CG$bt.par
+
+xtable(data.frame(
+                  alpha = c(cat_pars_3$`alpha.MIS+OTB-S`, exp(fit3$par['logalpha']), exp(CG3['logalpha']) %>% unlist),
+                  beta = c(cat_pars_3$`beta.MIS+OTB-S`, exp(fit3$par['logbeta']), exp(CG3['logbeta'])%>% unlist),
+                  k = c(cat_pars_3$`k.MIS+OTB-S`, exp(fit3$par['logK']), exp(CG3['logK'])%>% unlist),
+                  M = c(cat_pars_3$M, exp(fit3$par['logM']), exp(CG3['logM'])%>% unlist),
+                  N0 = c(cat_pars_3$N0, exp(fit3$par['logN0_scaled']), exp(CG3['logN0_scaled'])%>% unlist),
+                  SD_Ct = c(cat_pars_3$`psi.MIS+OTB-S`, exp(fit3$par["logsdCt"]), exp(CG3["logsdCt"])%>% unlist),
+                  R1 = c(cat_pars_3$`P1.MIS+OTB-S`,fit3$par[1],CG3[1]%>% unlist %>% exp),
+                  R2 = c(cat_pars_3$`P2.MIS+OTB-S`,fit3$par[2],CG3[2]%>% unlist %>% exp),
+
+                  row.names = c('CatDyn','RTMB', 'RTMB_CG')) %>% t, digits = 8) %>% 
+  print(comment = F,
+        sanitize.text.function = function(x)
+          {gsub("_", "\\\\_", x)})
+```
+

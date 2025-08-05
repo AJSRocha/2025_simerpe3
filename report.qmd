@@ -74,7 +74,495 @@ df_effort =
 
 ```
 
-```{r estim_catdyn}
+
+
+
+
+```{r}
+par = list(
+  # logRt_scaled = log(rep(50000,18)),
+  logRt_scaled = log( c(57744,40315,3534,21558,2766,
+                     9.735,55453,3438,16525,10746,
+                     14552,2524,22789,12567,34463,
+                     15000,15000,15000)),
+  logalpha      = log(1.1),
+  logbeta       = log(0.6),
+  logK          = log(0.00003),
+  logN0_scaled  = log(50000),
+  logM          = log(0.05),
+  logsdCt       = log(0.25 * sd(dat$Ct[dat$Ct > 0]))  # consistent with CatDyn
+)
+
+indice_manual =
+  list(
+    10,11,12,
+    12,12,10,11,12,
+    11,10,12,7,10,
+    12,11,12,12,10)
+
+for(i in 0:(length(indice_manual)-1)){
+  indice_manual[[i+1]] = 12*i + indice_manual[[i+1]]
+}
+```
+
+```{r}
+exp_cat = 
+catdynexp(cat_df, 18, c(par$logM, par$logN0_scaled, par$logRt_scaled, par$logK, par$logalpha, par$logbeta, par$logsdCt), 
+          c(head(cat_df$Data[[1]]$time.step,1),
+               unlist(indice_manual), #estimativa do timing da perturbacao
+              tail(cat_df$Data[[1]]$time.step,1)),
+          distr = 'normal')
+
+exp_cat$Model$Results$Predicted.Catch.thou
+
+ggplot() + 
+  geom_line(aes(x = 1:216,
+                y = exp_cat$Model$Results$Predicted.Catch.thou), col = 'red') + 
+    geom_line(aes(x = 1:216,
+                y = exp_cat$Model$Results$Observed.Catch.thou))
+```
+
+
+```{r}
+cat_df = as.CatDynData(x=df_effort %>%
+                         filter(as.numeric(
+                           as.character(year_sale)) %in% c(2006:2023)),
+                       step="month",
+                       fleet.name="MIS+OTB-S",
+                       coleff=6,
+                       colcat=5,
+                       colmbw=9,
+                       unitseff="trips",
+                       unitscat="kg",
+                       unitsmbw="kg",
+                       nmult="thou",
+                       season.dates=c(as.Date("2006-01-01"),
+                                      last_date_of_week(2023, 52)-1))
+
+distribuicoes = c("gamma", "lognormal","normal","negbin","aplnormal", "apnormal")
+optimizadores = c('CG', 'spg', 'BFGS', 'Nelder-Mead')
+
+#first trial
+a = Sys.time()
+fit_null =
+  trialer(cat_df,
+           p = 18,
+                M = exp(par$logM),
+                N0.ini = exp(par$logN0_scaled),
+                P = indice_manual,
+                P.ini  = as.list(par$logRt_scaled),
+                k.ini = exp(par$logK),
+                alpha.ini = exp(par$logalpha),
+                beta.ini  = exp(par$logbeta),
+                distr = distribuicoes[3],
+                method = optimizadores[1],
+                itnmax = 10000,
+                disp = list(exp(logsdCt)))
+b = Sys.time()
+b-a
+
+
+annual_biomass =
+  CatDynBSD(res_06$fit,
+            method = names(res_06$fit$Model),
+            multi = T,
+            mbw.sd = predicos$se.fit) %>% 
+  mutate(TimeStep = 216,
+         x =seq(2006,2023+11/12,1/12)) 
+
+catch_cat = unlist(CatDynPred(x=res_06$fit,method="spg")$Model$Results['Predicted.Catch.thou'])
+
+
+```
+
+
+
+# RTMB
+
+
+## Parameters to be estimated
+
+-   $\alpha$ is the abundance response
+
+-   $\beta$ is the effort response
+
+Both allow non-linearity for $E_t$ and $N_t$;
+
+-   $k$ is a scaling factor
+
+-   $M$ is the natural mortality (with $m = e^{-\frac{M}{2}}$)
+
+-   $N_0$ is the initial abundance of the stock at $t_0$
+
+-  $R_j$ are the recruitment pulse magnitudes
+
+## Model 3.1: GDM, as seen on CatDyn
+
+
+```{r}
+#| results: hide
+#| warning: false
+
+nmult = 1e3
+dat = list()
+dat$Ct = as.vector(cat_df$Data$`MIS+OTB-S`$obscat.thou)         # observed catch
+dat$Et = as.vector(cat_df$Data$`MIS+OTB-S`$obseff.trips)       # effort
+dat$u = unlist(indice_manual)                   # recruitment pulse months
+nT = length(dat$Ct)
+nR = length(dat$u)
+
+
+I = matrix(0, nrow = nT, ncol = nR)
+for (j in 1:nR) {
+  I[(dat$u[j]-1):nT, j] <- 1 # -1 foi adicionado para ficar consistente com CatDyn.
+}
+
+dat$I = I
+
+# Initial parameter values
+par # already defined on catdyn chunk
+
+# initialize joint negative loglikelihood function
+
+jnll = function(par) {
+  getAll(par, dat)
+
+  # Extract parameters
+  Ct     = OBS(Ct)
+  Et     = OBS(Et)
+  I  = OBS(I)
+  alpha  = exp(logalpha)
+  beta   = exp(logbeta)
+  K      = exp(logK)
+  N0     = exp(logN0_scaled)
+  M      = exp(logM)
+  sdCt   = exp(logsdCt)
+  Rt     = exp(logRt_scaled)
+
+  jnll = 0
+  # Initialize predicted catch and biomass
+
+
+  #comprimento = length(Ct)
+nstep <- vector("numeric", nT) * alpha#init vector
+mccum = vector("numeric", nT) * alpha
+effeff1 = vector("numeric", nT) * alpha
+effn1 = vector("numeric", nT) * alpha
+predcat = vector("numeric", nT) * alpha
+
+
+  mccum[1] = 0
+  nstep[1] <- N0 * exp(-M)
+  for(i in 2:nT){
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
+    nstep[i] = N0 * exp(-M*i) + 
+      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+      mccum[i] * exp(-M/2)
+    effeff1 <- Et^(alpha)
+    effn1 <- nstep^(beta)
+    predcat <- K * (effeff1 * effn1) * exp(-M/2)
+  }
+  
+  # Negative log-likelihood
+  jnll = -sum(dnorm(Ct, mean = predcat, sd = sdCt, log = TRUE))
+  # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
+    REPORT(predcat)
+  jnll
+
+}
+
+
+
+# quick test: do we get a number? This number should be a likelihood.
+jnll(par)
+
+obj = MakeADFun(jnll, par)
+
+# Set bounds
+
+Rt_min = 0      # recruitment can't be negative
+Rt_max = 1e8 
+
+lower <- list(
+  logRt_scaled = rep(Rt_min, 9),
+  logalpha = -10, logbeta = -10, logK = -10,
+  logN0_scaled = -10, logM = -10, logsdCt = -10
+)
+
+upper <- list(
+  logRt_scaled = rep(Rt_max, 9),
+  logalpha = 10, logbeta = 10, logK = 10,
+  logN0_scaled = 10, logM = 10, logsdCt = 10
+)
+
+# Run optimizer
+fit = nlminb(obj$par, obj$fn, obj$gr,
+  lower = unlist(lower),
+  upper = unlist(upper))
+
+# Retrieve predicted catch
+predicted_catch = obj$report()$predcat
+sdr = sdreport(obj)
+pl = as.list(sdr,"Est")
+plsd = as.list(sdr,"Std")
+
+ggplot() + 
+  geom_line(aes(x = 1:length(dat$Ct),
+                y = catch_cat)) + 
+   geom_line(aes(x = 1:length(dat$Ct),
+                y = predcat), col = 'red') +
+     geom_line(aes(x = 1:length(dat$Ct),
+                y = dat$Ct), linetype = 'dashed')
+```
+
+\todo[inline]{NaN warnings were also produced here}
+
+```{r}
+#| output: asis
+#| echo: false
+#| warning: false
+summary(sdr7) %>% 
+  as.data.frame() %>% 
+  slice(-c(7:36)) %>%
+  xtable %>% 
+  print(comment = F,
+        sanitize.text.function = function(x) 
+          {gsub("_", "\\\\_", x)})
+```
+
+```{r}
+# Calculate AIC
+logLik_value7 = -fit7$objective
+k = length(fit7$par)
+aic_value7 = 2 * k - 2 * logLik_value7
+
+# Calculate WAIC
+log_lik7 = numeric(length(dat$Ct))
+
+# Vector of predicted means
+meanvec7 = numeric(1)
+  m = exp(-exp(pl7$logM)/2)
+  
+  # catch[1] = K*Et[1]^alpha * m *(N0*exp(-M*1))^beta
+  meanvec7[1] = exp(pl7$logK)*
+    (dat$Et[1]^exp(pl7$logalpha)) *
+    m *(1e9*exp(pl7$logN0_scaled)) *
+    exp((-exp(pl7$logM)*1))^exp(pl7$logbeta)
+  
+  for(mes in 2:length(dat$Ct)){
+       # core
+    
+    core = exp(pl7$logK)*(dat$Et[mes]^exp(pl7$logalpha)) * m 
+    
+    # M-driven decay
+    
+    part1 = (1e9 * exp(pl7$logN0_scaled)) * exp(-exp(pl7$logM)*mes)
+    
+    # catch aggregation
+    
+    ## Using the observation series 
+    # part2 = 0
+    # for(mes_ant in seq_len(length(dat$Ct)-1)){
+    #   part2 = part2 + Ct[mes_ant]*exp(-M*(mes-mes_ant-1))}
+    
+    ## Using the expected catch recursively
+    part2 = 0
+      # if(mes != 1){
+    for(mes_ant in seq_len(length(meanvec7))){
+    part2 = part2 + meanvec7[mes_ant]*
+      exp(-exp(pl7$logM)*(mes-mes_ant-1))
+    }
+    # }
+    # Recruitment pulses
+    
+    part3 = 0
+    for(j in seq_along(dat$u[dat$u<=mes])){
+      part3 = part3 + pl7$Rt[j]*exp(-exp(pl7$logM)*(mes-dat$u[j]))}
+    
+    
+    # Assemble
+    base = part1 - m * part2 + part3
+    pred = core * (base)^exp(pl7$logbeta)
+    meanvec7[mes] = pred}
+  # for(mes in seq_along(dat$Ct)){
+  #   
+  #   m = exp(-exp(pl7$logM)/2)
+  #   
+  #   # core
+  #   
+  #   core = exp(pl7$logK)*(dat$Et[mes]^exp(pl7$logalpha)) * m 
+  #   
+  #   # M-driven decay
+  #   
+  #   part1 = exp(pl7$logN0)*exp(-exp(pl7$logM)*mes)
+  #   
+  #   # catch aggregation
+  #    
+  #   part2 = 0
+  #   for(mes_ant in seq_len(length(dat$Ct)-1)){
+  #     part2 = part2 + dat$Ct[mes_ant]*exp(-exp(pl7$logM)*(mes-mes_ant-1))}
+  #   
+  #   # Recruitment pulses
+  #   
+  #   part3 = 0
+  #   for(j in seq_along(dat$u[dat$u<=mes])){
+  #     part3 = part3 + 
+  #       summary(sdr7, 'random')[,'Estimate'][j]*
+  #       exp(-exp(pl7$logM)*(mes-dat$u[j]))}
+  #   
+  #   
+  #   # Assemble
+  #   pred = core * (part1 -m*part2 + part3)^exp(pl7$logbeta)
+  #   meanvec7[mes] = pred}
+  
+# Revert transformation of sigma(y)  
+sdy = exp(pl7$logsdCt)
+
+for(i in 1:length(dat$Ct)){
+  log_lik7[i] = dnorm(dat$Ct[i], meanvec7[i], sdy, log=TRUE)
+}
+
+lppd7 = sum(log(mean(exp(log_lik7))))
+p_waic7 = sum(var(log_lik7))
+waic7 = -2 * (lppd7 - p_waic7)
+
+```
+
+```{r}
+#| output: asis
+#| echo: false
+
+xtable(data.frame(Model = c('GMD'),
+                  AIC = c(aic_value7), 
+                  WAIC = c( waic7))) %>% 
+  print(comment = F,
+        sanitize.text.function = function(x)
+          {gsub("_", "\\\\_", x)})
+```
+
+
+
+```{r}
+# plot referencia catdyn
+# 
+results %>% 
+  ggplot() + 
+  geom_line(aes(x =Period.month, 
+                y = Observed.Catch.kg),
+            col = 'black') + 
+    geom_line(aes(x =Period.month, 
+                y = Predicted.Catch.kg),
+            col = 'red', linetype =2) + 
+  geom_line(aes(x =Period.month, 
+                y = dat$Ct),
+            col = 'green', linetype =2) + 
+  theme_bw()
+```
+
+
+```{r}
+ggplot() + 
+  geom_line(aes(x = annual_biomass$x,
+                y = annual_biomass$B.ton,
+                group = 1),
+            size = 1) +
+  geom_ribbon(aes(x = annual_biomass$x,
+                  y = annual_biomass$B.ton,
+                  ymin= annual_biomass$B.ton- 2*annual_biomass$B.ton.SE,
+                  ymax= annual_biomass$B.ton+ 2*annual_biomass$B.ton.SE),
+              alpha=0.2) +
+
+  # coord_cartesian(ylim = c(0, 300000), xlim = c(1995,2024)) +
+  theme_bw()
+
+results = res_06$pred$Model$Results %>% 
+  as.data.frame() %>% 
+  mutate(x = 1:216)
+
+natural_mortality = res_06$fit$Model$spg$bt.par$M
+natural_mortality_sd = res_06$fit$Model$spg$bt.stdev[['M']]
+
+# Fishing Mortality
+results %>% 
+  ggplot() + 
+  geom_line(aes(x = Period.month,
+                y = `Observed.F.1/month`),
+            col = 'tomato',
+            size = 1) +
+  geom_line(aes(x = Period.month,
+                y = `Predicted.F.1/month`),
+            col = 'darkred',
+            size = 1,
+            linetype = 2) + 
+  geom_hline(yintercept = natural_mortality,
+            col = 'darkgreen',
+            size = 1,
+            linetype = 1) +
+  geom_hline(yintercept = natural_mortality + 2*natural_mortality,
+             col = 'darkgreen',
+             size = 1,
+             linetype = 2) +
+  geom_hline(yintercept = natural_mortality - 2*natural_mortality,
+             col = 'darkgreen',
+             size = 1,
+             linetype = 2) +
+  theme_bw()
+
+# Exploitation Rate
+# Exploitation Rate
+
+results %>% 
+  ggplot() + 
+  geom_line(aes(x = Period.month,
+                y = `Observed.Explotrate`),
+            col = 'tomato',
+            size = 1) +
+
+  geom_line(aes(x = Period.month,
+                y = `Predicted.Explotrate`),
+            col = 'darkred',
+            size = 1,
+            linetype = 2) + 
+  geom_hline(yintercept = 0.4) + 
+  # geom_line(aes(x = Period.month,
+  #               y = `Observed.F.1/month`/(`Observed.F.1/month`+ natural_mortality)),
+  #           col = 'purple',
+  #           size = 1) +
+  # geom_hline(yintercept = 0.4,
+  #            col = 'darkgreen',
+  #            size = 1,
+  #            linetype = 1) +
+  theme_bw()
+
+
+results %>% 
+  summarise(pilas = `Observed.F.1/month`/(`Observed.F.1/month`+natural_mortality),
+            expo = Observed.Explotrate) %>% 
+  mutate(teste = pilas/expo)
+```
+
+```{r}
+#| echo: false
+
+set.seed(1)
+pred7 = rnorm(216,
+              meanvec7,
+              sdy)
+
+ggplot() + 
+  geom_point(aes(x = 1:216,
+                y = dat$Ct)) +
+   geom_line(aes(x = 1:216,
+                y = pred7),
+            color = 'green') + 
+  geom_line(aes(x = 1:216,
+                y = obj7$report()['catch'] %>% unlist()),
+            color = 'red') +
+  theme_bw()
+```
+
+```{r estim_catdyn, eval = F}
+
 cat_df = as.CatDynData(x=df_effort %>%
                          filter(as.numeric(
                            as.character(year_sale)) %in% c(2006:2023)),
@@ -242,513 +730,8 @@ annual_biomass =
   mutate(TimeStep = 216,
          x =seq(2006,2023+11/12,1/12)) 
 
-```
+catch_cat = unlist(CatDynPred(x=res_06$fit,method="spg")$Model$Results['Predicted.Catch.thou'])
 
-```{r}
-ggplot() + 
-  geom_line(aes(x = annual_biomass$x,
-                y = annual_biomass$B.ton,
-                group = 1),
-            size = 1) +
-  geom_ribbon(aes(x = annual_biomass$x,
-                  y = annual_biomass$B.ton,
-                  ymin= annual_biomass$B.ton- 2*annual_biomass$B.ton.SE,
-                  ymax= annual_biomass$B.ton+ 2*annual_biomass$B.ton.SE),
-              alpha=0.2) +
-
-  # coord_cartesian(ylim = c(0, 300000), xlim = c(1995,2024)) +
-  theme_bw()
-
-results = res_06$pred$Model$Results %>% 
-  as.data.frame() %>% 
-  mutate(x = 1:216)
-
-natural_mortality = res_06$fit$Model$spg$bt.par$M
-natural_mortality_sd = res_06$fit$Model$spg$bt.stdev[['M']]
-
-# Fishing Mortality
-results %>% 
-  ggplot() + 
-  geom_line(aes(x = Period.month,
-                y = `Observed.F.1/month`),
-            col = 'tomato',
-            size = 1) +
-  geom_line(aes(x = Period.month,
-                y = `Predicted.F.1/month`),
-            col = 'darkred',
-            size = 1,
-            linetype = 2) + 
-  geom_hline(yintercept = natural_mortality,
-            col = 'darkgreen',
-            size = 1,
-            linetype = 1) +
-  geom_hline(yintercept = natural_mortality + 2*natural_mortality,
-             col = 'darkgreen',
-             size = 1,
-             linetype = 2) +
-  geom_hline(yintercept = natural_mortality - 2*natural_mortality,
-             col = 'darkgreen',
-             size = 1,
-             linetype = 2) +
-  theme_bw()
-
-# Exploitation Rate
-# Exploitation Rate
-
-results %>% 
-  ggplot() + 
-  geom_line(aes(x = Period.month,
-                y = `Observed.Explotrate`),
-            col = 'tomato',
-            size = 1) +
-
-  geom_line(aes(x = Period.month,
-                y = `Predicted.Explotrate`),
-            col = 'darkred',
-            size = 1,
-            linetype = 2) + 
-  geom_hline(yintercept = 0.4) + 
-  # geom_line(aes(x = Period.month,
-  #               y = `Observed.F.1/month`/(`Observed.F.1/month`+ natural_mortality)),
-  #           col = 'purple',
-  #           size = 1) +
-  # geom_hline(yintercept = 0.4,
-  #            col = 'darkgreen',
-  #            size = 1,
-  #            linetype = 1) +
-  theme_bw()
-
-
-results %>% 
-  summarise(pilas = `Observed.F.1/month`/(`Observed.F.1/month`+natural_mortality),
-            expo = Observed.Explotrate) %>% 
-  mutate(teste = pilas/expo)
-```
-
-# RTMB
-
-## Formulation, step by step
-
-Consider the condensed formulation of this model, where catch in numbers is modeled as a function of observed effort and several parameters.
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_1}
-C_t = kE_t^\alpha N_t^\beta = m kE_t^\alpha f_t(M,N_0, C_{i<t}, R, S) \\
-\textrm{with} \quad m = e^{-\frac{M}{2}}
-    \end{aligned}
-\end{equation}
-
-The author typically considers several distributions for this process and tries them, along as several optimizers, in a systematic, grid-search-like approach.
-
-In order to incorporate this model in RTBM, we will have to break down the abundance estimate ($N_t^\beta$) into chunks that are easier to process. First we present the complete formulation and then we'll break down the chunks of $f(t)$ *ie*, everything that is raised to $\beta$.
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_2}
-C_t = kE_t^\alpha  m \left( N_0 e^{-Mt} -m \left[ \sum_{i=i}^{i=t-1} C_{i,i} e^{-M(t-i-1)} \right] + \sum_{j=1}^{j=u} I_j R_j e^{-M(t-\tau_j)} - \sum_{l=1}^{l=v} J_l S_l e^{-M(t-\upsilon_l} \right) ^ \beta
-    \end{aligned}
-\end{equation}
-
-## Chunk 1: Exponential Population Growth
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_ch1}
-N_0 e^{-Mt}
-    \end{aligned}
-\end{equation}
-
-The first term consists simply of natural population decay driven by natural mortality $M$, as illustrated below. Unlike other models, birth-driven input (recruitment) is not incorporated at this stage in the model. The model is only concerned with individuals available to the fishery, so until recruits attain a size that makes them eligible they are not accounted for. Their entry into the fishery will be modelled as discrete spikes.
-
-```{r}
-#| echo: false
-#| warning: false
-
-N0 = 1000000
-x = 1:348
-M = 0.05
-
-res_1 = c()
-# chunk 1
-for(tt in 1:length(x)){
-ch1 = N0 * exp(-M*tt)
-
-res_1[tt] = ch1
-}
-
-  ggplot() + 
-  geom_line(aes(x = x,
-                y = res_1)) + 
-  theme_bw() + 
-  labs(title = 'chunk 1')
-```
-
-## Chunk 2: Catch carry over
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_ch2}
- -m \left[ \sum_{i=i}^{i=t-1} C_{i,i} e^{-M(t-i-1)} \right] 
-    \end{aligned}
-\end{equation}
-
-This section incorporates the expected value for the catch in each year, with decay from natural mortality that intensifies the further you are from that year. It is explicitly recursive, unlike chunk 1, and therefore the code must account for that correctly. 
-
-It is unclear if $C_i$ accounts for the *entire* estimate in previous iterations or simply previous observations. For this report, the second alternative was implemented in the objective function
-
-## Chunk 3: Recruitment pulse input
-
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_2}
-    \sum_{j=1}^{j=u} I_j R_j e^{-M(t-\tau_j)}
-    \end{aligned}
-\end{equation}
-
-This chunk adds the recruitment pulses at timing $\tau_j$, of magnitude $R_j$, modulated by the time passed between $t$ and $\tau_j$. There is a quirk in this formulation regarding the use of an indicator vector $I_j$, which in all papers published by the author of CatDyn is said to be 0 when $\tau_j < t$ and 1 afterwards. This interpretation, combined with the double negative signals in the exponential component of the chunk, leads to a scenario where recruitment spikes that occur after the time step $t$ contribute to $C_t$, where as spikes before $t$ are nullified by the 0 in the indicator vector $I_j$. 
-
-In this work, an alternative formulation that is sometimes used by the author where the indicator vector is ommited. This does not mitigate the exponent signal effect, however.
-
-Finally, the timings for the perturbations in the vector $\tau_j$ must be manually inserted by the user after visual inspection of the data. The author has develloped an approach regarding catch spike statistics that will not be discussed here, so for the sake of this report $\tau_j$ will be inserted manually into the parameter list.
-
-There is a similar chunk with an inverted signal that accounts for emigration pulses; in octopus fisheries this is thought to reflect the moments when females leave the fishery after spawning. Currently it is assumed, due to the fishing gears used in the portuguese fishery, that such an exit does not occur in this particular case.
-
-## Parameters to be estimated
-
--   $\alpha$ is the abundance response
-
--   $\beta$ is the effort response
-
-Both allow non-linearity for $E_t$ and $N_t$;
-
--   $k$ is a scaling factor
-
--   $M$ is the natural mortality (with $m = e^{-\frac{M}{2}}$)
-
--   $N_0$ is the initial abundance of the stock at $t_0$
-
--  $R_j$ are the recruitment pulse magnitudes
-
-## Model 3.1: GDM, as seen on CatDyn
-
-
-
-```{r}
-#| results: hide
-#| warning: false
-
-dat = list()
-
-dat$Ct = as.vector(df_effort$catch_otb[as.numeric(
-  as.character(
-    df_effort$year_sale))>2005]/
-                     df_effort$res[as.numeric(
-                       as.character(
-                         df_effort$year_sale))>2005])  # catches
-
-dat$Et = as.vector(df_effort$effort_otb[as.numeric(
-  as.character(
-    df_effort$year_sale))>2005]) # effort
-
-indice_manual_2 = 
-  list(
-    10,11,12,
-    12,12,10,11,12,
-    11,12,10,12,11,
-    12,12,12,12,10)
-
-indice_manual_v = 
-  list(
-    7,7,7,
-    7,7,7,7,7,
-    7,7,7,7,7,
-    7,7,7,7,7)
-
-for(i in 0:(length(indice_manual_2)-1)){
-  indice_manual_2[[i+1]] = 12*i + indice_manual_2[[i+1]]
-}
-
-for(i in 0:(length(indice_manual_v)-1)){
-  indice_manual_v[[i+1]] = 12*i + indice_manual_v[[i+1]]
-}
-dat$u = unlist(indice_manual_2) # recruitment pulse timings
-dat$v = unlist(indice_manual_v)
-
-# initialize parameter list with initial estimates
-par = list()
-
-# par$Rt_scaled = as.vector(rep(20,
-#                               length(dat$u)))# init empty vector
-
-par$Rt_scaled = c(57.744,40.315,3.534,21.558,2.766,
-                     9.735,55.453,3.438,16.525,10.746,
-                     14.552,2.524,22.789,12.567,34.463,
-                     15.000,15.000,15.000)
-
-par$Ft_scaled = as.vector(rep(2,
-                              length(dat$u)))# init empty vector
-
-par$logalpha = log(.5)
-par$logbeta = log(.5)
-par$logK = log(0.001)
-par$logN0_scaled = log(6000000) # inserir nmult
-par$logM = log(0.001)
-
-par$logsdCt = 20
-
-# initialize joint negative loglikelihood function
-jnll = function(par){
-  getAll(par, dat) # invoke all the parameters and data
-  
-  # gather and cleanup pars
-  Ct = OBS(Ct)
-  alpha = exp(logalpha)
-  beta = exp(logbeta)
-  K = exp(logK)
-  N0 = 1e6 * exp(logN0_scaled)
-  # N0 = exp(logN0)
-  M = exp(logM)
-  sdCt = exp(logsdCt)
-  Rt = 1e6 * Rt_scaled
-  Ft = 1e6 * Ft_scaled
-  
-  # assemble model    
-  jnll = 0 # init jnll
- 
-  # Initial values
- 
-  catch = advector(rep(0, length(dat$Ct)))
-  
-    for(mes in 1:length(dat$Ct)){
-       # core
-    m = exp(-M/2)
-    
-    if(mes == 1){
-      pred = K*Et[mes]^alpha * m * (N0*exp(-M*1))^beta
-    }else{
-    
-    core = K*(Et[mes]^alpha) * m 
-    
-    # M-driven decay
-    
-    part1 = N0*exp(-M*mes)
-    
-    # catch aggregation
-    
-    ## Using the observation series 
-    # part2 = 0
-    # for(mes_ant in seq_len(length(dat$Ct)-1)){
-    #   part2 = part2 + Ct[mes_ant]*exp(-M*(mes-mes_ant-1))}
-    
-    ## Using the expected catch recursively
-    part2 = 0
-      # if(mes != 1){
-    for(mes_ant in 1:(mes-1)){
-    part2 = part2 + catch[mes_ant]*exp(-M*(mes-mes_ant-1))}
-
-    # }
-    # Recruitment pulses
-    
-    part3 = 0
-    for(j in seq_along(u[u<=mes])){
-      part3 = part3 + Rt[j]*exp(-M*(mes-u[j]))}
-    
-    part4 = 0
-    for(j in seq_along(v[v<=mes])){
-      part4 = part4 + Ft[j]*exp(-M*(mes-v[j]))}
-    
-    
-    # Assemble
-    pred = core * (part1 - m * part2 + part3 - part4)^beta}
-    
-    catch[mes] = advector(pred)
-    
-    jnll = jnll - dnorm(Ct[mes], pred, sdCt, log = T)
-   
-  }
-  REPORT(catch)
-  jnll
-}
-
-# quick test: do we get a number? This number should be a likelihood.
-jnll(par)
-
-obj7 = MakeADFun(jnll, par, random = c('Rt_scaled', 'Ft_scaled'))
-
-
-obj7$report()['catch']
-
-fit7 = nlminb(obj7$par, obj7$fn, obj7$gr)
-
-sdr7 = sdreport(obj7)
-pl7 = as.list(sdr7,"Est")
-plsd7 = as.list(sdr7,"Std")
-```
-
-\todo[inline]{NaN warnings were also produced here}
-
-```{r}
-#| output: asis
-#| echo: false
-#| warning: false
-summary(sdr7) %>% 
-  as.data.frame() %>% 
-  slice(-c(7:36)) %>%
-  xtable %>% 
-  print(comment = F,
-        sanitize.text.function = function(x) 
-          {gsub("_", "\\\\_", x)})
-```
-
-```{r}
-# Calculate AIC
-logLik_value7 = -fit7$objective
-k = length(fit7$par)
-aic_value7 = 2 * k - 2 * logLik_value7
-
-# Calculate WAIC
-log_lik7 = numeric(length(dat$Ct))
-
-# Vector of predicted means
-meanvec7 = numeric(1)
-  m = exp(-exp(pl7$logM)/2)
-  
-  # catch[1] = K*Et[1]^alpha * m *(N0*exp(-M*1))^beta
-  meanvec7[1] = exp(pl7$logK)*
-    (dat$Et[1]^exp(pl7$logalpha)) *
-    m *(1e9*exp(pl7$logN0_scaled)) *
-    exp((-exp(pl7$logM)*1))^exp(pl7$logbeta)
-  
-  for(mes in 2:length(dat$Ct)){
-       # core
-    
-    core = exp(pl7$logK)*(dat$Et[mes]^exp(pl7$logalpha)) * m 
-    
-    # M-driven decay
-    
-    part1 = (1e9 * exp(pl7$logN0_scaled)) * exp(-exp(pl7$logM)*mes)
-    
-    # catch aggregation
-    
-    ## Using the observation series 
-    # part2 = 0
-    # for(mes_ant in seq_len(length(dat$Ct)-1)){
-    #   part2 = part2 + Ct[mes_ant]*exp(-M*(mes-mes_ant-1))}
-    
-    ## Using the expected catch recursively
-    part2 = 0
-      # if(mes != 1){
-    for(mes_ant in seq_len(length(meanvec7))){
-    part2 = part2 + meanvec7[mes_ant]*
-      exp(-exp(pl7$logM)*(mes-mes_ant-1))
-    }
-    # }
-    # Recruitment pulses
-    
-    part3 = 0
-    for(j in seq_along(dat$u[dat$u<=mes])){
-      part3 = part3 + pl7$Rt[j]*exp(-exp(pl7$logM)*(mes-dat$u[j]))}
-    
-    
-    # Assemble
-    base = part1 - m * part2 + part3
-    pred = core * (base)^exp(pl7$logbeta)
-    meanvec7[mes] = pred}
-  # for(mes in seq_along(dat$Ct)){
-  #   
-  #   m = exp(-exp(pl7$logM)/2)
-  #   
-  #   # core
-  #   
-  #   core = exp(pl7$logK)*(dat$Et[mes]^exp(pl7$logalpha)) * m 
-  #   
-  #   # M-driven decay
-  #   
-  #   part1 = exp(pl7$logN0)*exp(-exp(pl7$logM)*mes)
-  #   
-  #   # catch aggregation
-  #    
-  #   part2 = 0
-  #   for(mes_ant in seq_len(length(dat$Ct)-1)){
-  #     part2 = part2 + dat$Ct[mes_ant]*exp(-exp(pl7$logM)*(mes-mes_ant-1))}
-  #   
-  #   # Recruitment pulses
-  #   
-  #   part3 = 0
-  #   for(j in seq_along(dat$u[dat$u<=mes])){
-  #     part3 = part3 + 
-  #       summary(sdr7, 'random')[,'Estimate'][j]*
-  #       exp(-exp(pl7$logM)*(mes-dat$u[j]))}
-  #   
-  #   
-  #   # Assemble
-  #   pred = core * (part1 -m*part2 + part3)^exp(pl7$logbeta)
-  #   meanvec7[mes] = pred}
-  
-# Revert transformation of sigma(y)  
-sdy = exp(pl7$logsdCt)
-
-for(i in 1:length(dat$Ct)){
-  log_lik7[i] = dnorm(dat$Ct[i], meanvec7[i], sdy, log=TRUE)
-}
-
-lppd7 = sum(log(mean(exp(log_lik7))))
-p_waic7 = sum(var(log_lik7))
-waic7 = -2 * (lppd7 - p_waic7)
-
-```
-
-```{r}
-#| output: asis
-#| echo: false
-
-xtable(data.frame(Model = c('GMD'),
-                  AIC = c(aic_value7), 
-                  WAIC = c( waic7))) %>% 
-  print(comment = F,
-        sanitize.text.function = function(x)
-          {gsub("_", "\\\\_", x)})
-```
-
-Convergence was problematic, but we did achieve plausible estimates. $M$ and $N0$ did not yield standard error estimates, and we have some negative values for $R_j$, which should not be possible. We have explicitly excluded the scenario of exit pulses, but if we attempt to bound $R_j$ to positive values the model convergence completely falls apart. Perhaps that premise should be reevaluated?
-
-```{r}
-# plot referencia catdyn
-# 
-results %>% 
-  ggplot() + 
-  geom_line(aes(x =Period.month, 
-                y = Observed.Catch.kg),
-            col = 'black') + 
-    geom_line(aes(x =Period.month, 
-                y = Predicted.Catch.kg),
-            col = 'red', linetype =2) + 
-  geom_line(aes(x =Period.month, 
-                y = dat$Ct),
-            col = 'green', linetype =2) + 
-  theme_bw()
-```
-
-
-```{r}
-#| echo: false
-
-set.seed(1)
-pred7 = rnorm(216,
-              meanvec7,
-              sdy)
-
-ggplot() + 
-  geom_point(aes(x = 1:216,
-                y = dat$Ct)) +
-   geom_line(aes(x = 1:216,
-                y = pred7),
-            color = 'green') + 
-  geom_line(aes(x = 1:216,
-                y = obj7$report()['catch'] %>% unlist()),
-            color = 'red') +
-  theme_bw()
 ```
 
 \begin{abstract}
