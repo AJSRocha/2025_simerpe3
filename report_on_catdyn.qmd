@@ -148,7 +148,7 @@ report_manual = function(p, method, dates,
           names(results2[[i]]$bt.stdev) <- par.names
           colnames(results2[[i]]$Cor) <- par.names
           rownames(results2[[i]]$Cor) <- par.names
-                    }}
+                    }}else{print('convergencia e meio merdosa')}}
         return(results2)}      
 ```
 
@@ -320,7 +320,7 @@ jnll = function(par) {
   # Extract parameters
   Ct     = OBS(Ct)
   Et     = OBS(Et)
-  I_mat  = OBS(I)
+  I  = OBS(I)
   alpha  = exp(logalpha)
   beta   = exp(logbeta)
   K      = exp(logK)
@@ -351,7 +351,7 @@ alpha = exp(logalpha)
   for(i in 2:nT){
     mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
     nstep[i] = N0 * exp(-M*i) + 
-      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+      sum(I[i,] * Rt * exp(-M*(i-(u-1)+1))) -
       mccum[i] * exp(-M/2)
     effeff1 <- Et^(alpha)
     effn1 <- nstep^(beta)
@@ -599,7 +599,7 @@ jfldesvent1112.2P.1.apn.fit  <- CatDynFit(x=jflcrusoe0203,
                                           par=pars.ini.2P,
                                           dates=dates.2P,
                                           distr="normal",
-                                          method=c("spg","CG","Nelder-Mead"),
+                                          method=c("CG"),
                                           itnmax=50000)
 
 
@@ -648,7 +648,7 @@ jnll = function(par) {
   # Extract parameters
   Ct     = OBS(Ct)
   Et     = OBS(Et)
-  I_mat  = OBS(I)
+  I  = OBS(I)
   alpha  = exp(logalpha)
   beta   = exp(logbeta)
   K      = exp(logK)
@@ -679,7 +679,7 @@ alpha = exp(logalpha)
   for(i in 2:nT){
     mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
     nstep[i] = N0 * exp(-M*i) + 
-      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+      sum(I[i,] * Rt * exp(-M*(i-(u-1)+1))) -
       mccum[i] * exp(-M/2)
     effeff1 <- Et^(alpha)
     effn1 <- nstep^(beta)
@@ -752,6 +752,8 @@ report_manual(p = 2,
 
 # Retrieve predicted catch
 predicted_catch_2 = obj2$report()$predcat
+predicted_catch_2
+CatDynPred(jfldesvent1112.2P.1.apn.fit, method = 'CG')$Model$Results['Observed.Catch.thou']
 
 ```
 
@@ -788,8 +790,8 @@ xtable(data.frame(
                   M = c(cat_pars_2$M, exp(fit2$par['logM']), exp(CG2['logM'])%>% unlist),
                   N0 = c(cat_pars_2$N0, exp(fit2$par['logN0']), exp(CG2['logN0'])%>% unlist),
                   SD_Ct = c(cat_pars_2$psi.nasas, exp(fit2$par["logsdCt"]), exp(CG2["logsdCt"])%>% unlist),
-                  R1 = c(cat_pars_2$P1.nasas,fit2$par[1],CG2[1]%>% unlist %>% exp),
-                  R2 = c(cat_pars_2$P2.nasas,fit2$par[2],CG2[2]%>% unlist %>% exp),
+                  R1 = c(cat_pars_2$P1.nasas,fit2$par[3],CG2[3]%>% unlist %>% exp),
+                  R2 = c(cat_pars_2$P2.nasas,fit2$par[4],CG2[4]%>% unlist %>% exp),
 
                   row.names = c('CatDyn','RTMB', 'RTMB_CG')) %>% t, digits = 8) %>% 
   print(comment = F,
@@ -798,53 +800,40 @@ xtable(data.frame(
 
 
                                 
- check_1cat = 
-catdynexp(x=tibec.14.22.pg.2,                                 
-      p=9,
-      par=log(c(cat_pars_1$M,
-      cat_pars_1$N0,
-      cat_pars_1$P1.Pelagic,
-      cat_pars_1$P2.Pelagic,
-      cat_pars_1$P3.Pelagic,
-      cat_pars_1$P4.Pelagic,
-      cat_pars_1$P5.Pelagic,
-      cat_pars_1$P6.Pelagic,
-      cat_pars_1$P7.Pelagic,
-      cat_pars_1$P8.Pelagic,
-      cat_pars_1$P9.Pelagic,
-      cat_pars_1$k.Pelagic,
-      cat_pars_1$alpha.Pelagic,
-      cat_pars_1$beta.Pelagic,
-      cat_pars_1$psi.Pelagic)),
-      dates=tibec.14.22.pg.dates.1,
+ check_1cat_2 = 
+catdynexp(x=jflcrusoe0203,                                 
+      p=2,
+      par=log(c(cat_pars_2$M,
+      cat_pars_2$N0,
+      cat_pars_2$P1.nasas,
+      cat_pars_2$P2.nasas,
+      cat_pars_2$k.nasas,
+      cat_pars_2$alpha.nasas,
+      cat_pars_2$beta.nasas,
+      cat_pars_2$psi.nasas)),
+      dates=dates.2P,
       distr="normal")
 
-check_2cat = 
-catdynexp(x=tibec.14.22.pg.2,                                 
-      p=9,
-      par=log(c(exp(fit7$par['logM']),
-      exp(fit7$par['logN0']),
-      fit7$par[1]%>% exp,
-      fit7$par[2]%>% exp,
-      fit7$par[3]%>% exp,
-      fit7$par[4]%>% exp,
-      fit7$par[5]%>% exp,
-      fit7$par[6]%>% exp,
-      fit7$par[7]%>% exp,
-      fit7$par[8]%>% exp,
-      fit7$par[9]%>% exp,
-      exp(fit7$par['logK']),
-      exp(fit7$par['logalpha']),
-      exp(fit7$par['logbeta']),
-      exp(fit7$par['logsdCt']))),
-      dates=tibec.14.22.pg.dates.1,
+check_2cat_2 = 
+catdynexp(x=jflcrusoe0203,                                 
+      p=2,
+      par=log(c(exp(fit2$par['logM']),
+      exp(fit2$par['logN0']),
+      fit2$par[3]%>% exp,
+      fit2$par[4]%>% exp,
+      exp(fit2$par['logK']),
+      exp(fit2$par['logalpha']),
+      exp(fit2$par['logbeta']),
+      exp(fit2$par['logsdCt']))),
+      dates=dates.2P,
       distr="normal")
 
 ggplot() + 
-  geom_line(aes(x = 1:108,
-                y = check_1cat$Model$Results$Predicted.Catch.thou)) + 
-  geom_line(aes(x = 1:108,
-                y = check_2cat$Model$Results$Predicted.Catch.thou), col = 'red') + 
+  geom_line(aes(x = 1:36,
+                y = check_1cat_2$Model$Results$Predicted.Catch.thou)) + 
+  geom_line(aes(x = 1:36,
+                y = check_2cat_2$Model$Results$Predicted.Catch.thou), col = 'red',
+            linetype = 'dashed') + 
   theme_bw() + 
   labs(y = 'catch', title = 'Catdyn (black), RTMB (red)')
 
@@ -981,6 +970,8 @@ annual_biomass =
 catch_occ = unlist(CatDynPred(x=fit_occ$fit,method="CG")$Model$Results['Predicted.Catch.thou'])
 ```
 
+## RTMB
+
 ```{r}
 par$logN0_scaled
 
@@ -990,7 +981,7 @@ jnll = function(par) {
   # Extract parameters
   Ct     = OBS(Ct)
   Et     = OBS(Et)
-  I_mat  = OBS(I)
+  I  =    OBS(I)
   alpha  = exp(logalpha)
   beta   = exp(logbeta)
   k      = exp(logK)
@@ -1008,7 +999,7 @@ nstep <- vector("numeric", nT) * alpha#init vector
 mccum = vector("numeric", nT) * alpha
 effeff1 = vector("numeric", nT) * alpha
 effn1 = vector("numeric", nT) * alpha
-predcat2 = vector("numeric", nT) * alpha
+predcat = vector("numeric", nT) * alpha
 
 # N0 = exp(logN0)
 # M = exp(logM)
@@ -1021,7 +1012,7 @@ predcat2 = vector("numeric", nT) * alpha
   for(i in 2:nT){
     mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
     nstep[i] = N0 * exp(-M*i) + 
-      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+      sum(I[i,] * Rt * exp(-M*(i-(u-1)+1))) -
       mccum[i] * exp(-M/2)
     effeff1 <- Et^(alpha)
     effn1 <- nstep^(beta)
@@ -1080,7 +1071,6 @@ CG3 = optimx(par = obj3$par,
              itnmax = 50000)
 
 # report from catdyn
-fit_occ$fit$Model$Model$CG
 fit_occ$fit$Model
 
 # report from RTMB
