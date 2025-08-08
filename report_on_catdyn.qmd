@@ -1,5 +1,6 @@
 ---
-title: "Polvices polvando polvivamente"
+title: "CatDyn to RTMB"
+subtitle: "Some notes on porting functionality between the 2 methodologies"
 format:
    pdf:
        include-in-header:
@@ -30,12 +31,18 @@ editor_options:
 ```{r}
 #| eval: false
 #| echo: false
+#| include: false
 tinytex::parse_install("report.log")
 tinytex::tlmgr_update()
 
 
 # https://cameronpatrick.com/post/2023/07/quarto-thesis-formatting/
 ```
+
+# Introduction
+
+Multi-annual generalized depletion models (MAGD) currently available in the package *CatDyn* rank among the most interesting and promising tools for stock assessment. These models focus on modelling catch dynamics (hence the name) and can serve as a solid base for estimates for biomass assessment models. In the current version of the package, they suffer from a series of constraints caused by the structure of the package that limits their applicability.
+
 
 ```{r setup}
 #| include: false
@@ -147,8 +154,8 @@ report_manual = function(p, method, dates,
           names(results2[[i]]$bt.par) <- par.names
           names(results2[[i]]$bt.stdev) <- par.names
           colnames(results2[[i]]$Cor) <- par.names
-          rownames(results2[[i]]$Cor) <- par.names
-                    }}else{print('convergencia e meio merdosa')}}
+          rownames(results2[[i]]$Cor) <- par.names 
+        } else {print('convergencia e meio merdosa')}}
         return(results2)}      
 ```
 
@@ -340,11 +347,6 @@ effeff1 = vector("numeric", nT) * alpha
 effn1 = vector("numeric", nT) * alpha
 predcat2 = vector("numeric", nT) * alpha
 
-N0 = exp(logN0)
-M = exp(logM)
-k = exp(logK)
-beta = exp(logbeta)
-alpha = exp(logalpha)
 
   mccum[1] = 0
   nstep[1] <- N0 * exp(-M)
@@ -355,11 +357,11 @@ alpha = exp(logalpha)
       mccum[i] * exp(-M/2)
     effeff1 <- Et^(alpha)
     effn1 <- nstep^(beta)
-    predcat <- k * (effeff1 * effn1) * exp(-M/2)
+    predcat <- K * (effeff1 * effn1) * exp(-M/2)
   }
   
   # Negative log-likelihood
-  jnll = -sum(dnorm(Ct, mean = predcat, sd = sdCt, log = TRUE))
+  jnll = -sum(dnorm(Ct, mean = predcat, sd = sqrt(sdCt), log = TRUE))
   # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
     REPORT(predcat)
   jnll
@@ -540,6 +542,8 @@ ncol=1)
 
 ## CatDyn (Example from Workshop)
 
+Estimativas divergiram até baixar N0.ini de 5* para 3*
+
 ```{r}
 cateff1.Crusoe <- read.csv("WS/RobinsonCrusoeLobster.csv",header=TRUE)
 #
@@ -572,7 +576,7 @@ jflcrusoe0203  <- as.CatDynData(x=cateff1.Crusoe[cateff1.Crusoe$Season==1,],
 #
 # Initial values for 2 input depletion variant
 M.ini       <- 10*0.001937482
-N0.ini      <- 5*9.210188
+N0.ini      <- 3*9.210188
 P1.ini      <- 45
 P2.ini      <- 20
 k.ini       <- 8.5e-4                                                           # always between 1e-3 and 1e-6
@@ -586,11 +590,11 @@ dates.2P    <- c(head(jflcrusoe0203$Data$nasas$time.step,1),                   #
                  49,                                                            # the week of one input of abundance
                  tail(jflcrusoe0203$Data$nasas$time.step,1))
 #
-jfldesvent1112.2P.apn.ini <- catdynexp(x=jflcrusoe0203,
-                                       p=2,
-                                       par=pars.ini.2P,
-                                       dates=dates.2P,
-                                       distr="normal")
+# jfldesvent1112.2P.apn.ini <- catdynexp(x=jflcrusoe0203,
+#                                        p=2,
+#                                        par=pars.ini.2P,
+#                                        dates=dates.2P,
+                                       # distr="normal")
 #
 
 
@@ -629,10 +633,10 @@ dat$I = I
 par = list(
   logM          = log(M.ini),
   logN0         = log(N0.ini),
-  Rt_scaled     = log(c(45,20)),
+  Rt_scaled     = log(c(P1.ini, P2.ini)),
   logK          = log(k.ini),
-  logalpha      = log(1),
-  logbeta       = log(1),
+  logalpha      = log(alpha.ini),
+  logbeta       = log(beta.ini),
   logsdCt       = log(psi.ini)  # consistent with CatDyn
 )
 
@@ -666,13 +670,8 @@ nstep <- vector("numeric", nT) * alpha#init vector
 mccum = vector("numeric", nT) * alpha
 effeff1 = vector("numeric", nT) * alpha
 effn1 = vector("numeric", nT) * alpha
-predcat2 = vector("numeric", nT) * alpha
+predcat = vector("numeric", nT) * alpha
 
-N0 = exp(logN0)
-M = exp(logM)
-k = exp(logK)
-beta = exp(logbeta)
-alpha = exp(logalpha)
 
   mccum[1] = 0
   nstep[1] <- N0 * exp(-M)
@@ -683,11 +682,11 @@ alpha = exp(logalpha)
       mccum[i] * exp(-M/2)
     effeff1 <- Et^(alpha)
     effn1 <- nstep^(beta)
-    predcat <- k * (effeff1 * effn1) * exp(-M/2)
+    predcat <- K * (effeff1 * effn1) * exp(-M/2)
   }
   
   # Negative log-likelihood
-  jnll = -sum(dnorm(Ct, mean = predcat, sd = sdCt, log = TRUE))
+  jnll = -sum(dnorm(Ct, mean = predcat, sd = sqrt(sdCt), log = TRUE))
   # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
     REPORT(predcat)
   jnll
@@ -735,7 +734,8 @@ CG2 = optimx(par = obj2$par,
              method = 'CG',
              output = 'estimate',
              hessian = T,
-             itnmax = 50000)
+             itnmax = 50000,
+             control = list())
 
 # report from catdyn
 jfldesvent1112.2P.1.apn.fit$Model$CG
