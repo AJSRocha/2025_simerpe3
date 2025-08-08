@@ -224,6 +224,7 @@ n_{\text{step},i} &= N_0 \cdot e^{-Mi} + \sum_{u} I_{i,u} \cdot R_t \cdot e^{-M(
 Despite the differences in the indexation, it can be shown that this objective function and *CatDynPred()* (and later *CatDynFit()*) are numerically equivalent: First we load the data:
 
 ```{r}
+#| echo: false
 # Blue shark example
 tibec.14.22.pg.1 <- read.csv("WS/tibec.14.22.pg.1.csv",header=TRUE)
 
@@ -271,6 +272,128 @@ jflcrusoe0203  <- as.CatDynData(x=cateff1.Crusoe[cateff1.Crusoe$Season==1,],
 
 Then we can compare both approaches:
 
+```{r}
+#| echo: false
+df = tibec.14.22.pg.2
+
+P1.Pelagic  <- 12  #2014
+P2.Pelagic  <- 24  #2015
+P3.Pelagic  <- 36  #2016
+P4.Pelagic  <- 47  #2017 
+P5.Pelagic  <- 60  #2018 
+P6.Pelagic  <- 72  #2019
+P7.Pelagic  <- 84  #2020 
+P8.Pelagic  <- 96  #2021
+P9.Pelagic  <- 107 #2022
+#
+tibec.14.22.pg.dates.1  <- c(head(tibec.14.22.pg.2$Data[[1]]$time.step,1),
+                             P1.Pelagic,
+                             P2.Pelagic,
+                             P3.Pelagic,
+                             P4.Pelagic,
+                             P5.Pelagic,
+                             P6.Pelagic,
+                             P7.Pelagic,
+                             P8.Pelagic,
+                             P9.Pelagic,
+                             tail(tibec.14.22.pg.2$Data[[1]]$time.step,1))
+
+M.ini             <- 0.015
+N0.ini            <- 500
+P1.ini.Pelagic    <- 100 #12  2014
+P2.ini.Pelagic    <- 50  #24  2015
+P3.ini.Pelagic    <- 50  #36  2016
+P4.ini.Pelagic    <- 50  #47  2017
+P5.ini.Pelagic    <- 100 #60  2018
+P6.ini.Pelagic    <- 60  #72  2019
+P7.ini.Pelagic    <- 350 #84  2020
+P8.ini.Pelagic    <- 150 #96  2021
+P9.ini.Pelagic    <- 150 #107 2022
+k.ini.Pelagic     <- 2e-6
+alpha.ini.Pelagic <- 1
+beta.ini.Pelagic  <- 1
+#
+psi.ini.Pelagic    <- 0.25*sd(tibec.14.22.pg.2$Data$Pelagic$obscat.thou[
+  tibec.14.22.pg.2$Data$Pelagic$obscat.thou>0])^2
+psilog.ini.Pelagic <- 0.25*sd(log(tibec.14.22.pg.2$Data$Pelagic$obscat.thou[
+  tibec.14.22.pg.2$Data$Pelagic$obscat.thou>0]))^2
+
+tibec.14.22.pg.pars.ini <- log(c(M.ini,
+                                 N0.ini,
+                                 P1.ini.Pelagic,
+                                 P2.ini.Pelagic,
+                                 P3.ini.Pelagic,
+                                 P4.ini.Pelagic,
+                                 P5.ini.Pelagic,
+                                 P6.ini.Pelagic,
+                                 P7.ini.Pelagic,
+                                 P8.ini.Pelagic,
+                                 P9.ini.Pelagic,
+                                 k.ini.Pelagic,
+                                 alpha.ini.Pelagic,
+                                 beta.ini.Pelagic,
+                                 psi.ini.Pelagic))
+#
+
+
+
+tibec.14.22.pg.ini.apn <- catdynexp(x=tibec.14.22.pg.2,                                 
+                                    p=9,
+                                    par=tibec.14.22.pg.pars.ini[1:15],
+                                    dates=tibec.14.22.pg.dates.1,
+                                    distr="normal")
+
+
+simul_catdyn = tibec.14.22.pg.ini.apn$Model$Results$Predicted.Catch.thou
+
+#################################################
+
+Ct = as.vector(tibec.14.22.pg.2$Data$Pelagic$obscat.thou)         # observed catch
+Et = as.vector(tibec.14.22.pg.2$Data$Pelagic$obseff.ntrips)       # effort
+u = c(12, 24, 36, 47, 60, 72, 84, 96, 107)                        # recruitment pulse months
+nT = length(Ct)
+nR = length(u)
+I = matrix(0, nrow = nT, ncol = nR)
+for (j in 1:nR) {
+  I[(u[j]-1):nT, j] <- 1 # -1 foi adicionado para ficar consistente com CatDyn.
+}
+Rt = c(P1.ini.Pelagic,P2.ini.Pelagic,
+      P3.ini.Pelagic,P4.ini.Pelagic,
+      P5.ini.Pelagic, P6.ini.Pelagic,
+      P7.ini.Pelagic, P8.ini.Pelagic,
+      P9.ini.Pelagic)
+
+nstep <- vector("numeric", nT) * alpha.ini.Pelagic #init vector
+mccum = vector("numeric", nT) * alpha.ini.Pelagic 
+effeff1 = vector("numeric", nT) * alpha.ini.Pelagic 
+effn1 = vector("numeric", nT) * alpha.ini.Pelagic 
+predcat = vector("numeric", nT) * alpha.ini.Pelagic 
+
+
+    mccum[1] = 0
+  nstep[1] = N0.ini * exp(-M.ini)
+  for(i in 2:nT){
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M.ini)
+    nstep[i] = N0.ini * exp(-M.ini*i) + 
+      sum(I[i,] * Rt * exp(-M.ini*(i-(u-1)+1))) -
+      mccum[i] * exp(-M.ini/2)
+    effeff1 <- Et^(alpha.ini.Pelagic )
+    effn1 <- nstep^(beta.ini.Pelagic )
+    predcat = k.ini.Pelagic  * (effeff1 * effn1) * exp(-M.ini/2)
+  }
+  
+  
+ggplot() + 
+  geom_line(aes(x = 1:108,
+                y = simul_catdyn)) + 
+  # geom_line(aes(x = 1:108,
+  # y = rnorm(108,catch,sdCt)), col = 'red') + 
+  geom_line(aes(x = 1:108,
+                y = predcat), col = 'red',
+            linetype = 'dashed') + 
+  theme_bw()
+  
+```
 
 
 - Default order is $M$, $N_0$, $R_t$, $k$, $\alpha$, $\beta$ and $\psi$
