@@ -39,11 +39,6 @@ tinytex::tlmgr_update()
 # https://cameronpatrick.com/post/2023/07/quarto-thesis-formatting/
 ```
 
-# Introduction
-
-Multi-annual generalized depletion models (MAGD) currently available in the package *CatDyn* rank among the most interesting and promising tools for stock assessment. These models focus on modelling catch dynamics (hence the name) and can serve as a solid base for estimates for biomass assessment models. In the current version of the package, they suffer from a series of constraints caused by the structure of the package that limits their applicability.
-
-
 ```{r setup}
 #| include: false
 
@@ -159,18 +154,80 @@ report_manual = function(p, method, dates,
         return(results2)}      
 ```
 
-- Default order is $M$, $N_0$, $R_t$, $k$, $\alpha$, $\beta$ and $\psi$
 
-# Blue Shark Example
+# Introduction
+Multi-annual generalized depletion models (MAGD) currently available in the package *CatDyn* rank among the most interesting and promising tools for stock assessment. These models focus on modelling catch dynamics (hence the name) and can serve as a solid base for estimates for biomass assessment models. In the current version of the package, they suffer from a series of constraints caused by the structure of the package that limits their applicability. The goal of this report is to document the transition of the *CatDyn* workflow to a more generalized *RTMB* approach.  
 
-## CatDyn (Example from Workshop)
+Throughout this document, two example datasets will be used. Both datasets were presented by the $CatDyn$ package author during a workshop on this methodology. 
+
+
+## Current limitations in *CatDyn*.
+While *CatDyn*, as of version 1.1-1, is a fantastical piece of software, it suffers from some limitations that could be adressed by a diferent approach to implementation:
+
+### Hard limit on the series size
+*CatDyn* takes the number of fishing seasons in the data (encoded internally as $p$) and uses it to select a variation of the optimization code suited for that number of parameters to be estimated. Each of these variations was adapted from a common template by hand in what we can only assume to be an extremely tedious and laborious process. The author decided to stop at a maximum of 25 fishing seasons. Because scenarios with transit require their own functions (signaled by the user by passing $p$ as a negative number), this required the preparation of 50 distinct optimization and report functions. This approach also forces the exclusion of scenarios where the number of positive pulses in abundance (*ie* recruitment) and negative pulses (*ie* migrations) differ.
+
+### Limit on the number of fleets
+*CatDyn* allows for the incorporation of 2 distinct fleets operating in the fishery, each being modeled with their on estimates for $K_f$, $\alpha_f$, $\beta_f$, $R_{u,f}$ and $S_{v,}f$, with shared estimates for $N_0$ and $M$. These estimates are derived from separate $C_{t,f}$ and $E_{t,f}$ data series. Like the previous example, accounting for 1 and 2 fleet scenarios required a set of functions for each instance, raising the total variations to 100 so far.
+
+### Alternate formulations and time-dependent parameters
+The current implementation relies on a fixed formulation of the objective function that does not allow $K$, $\alpha$, $\beta$ or $M$ to change over time, nor the inclusion of more parameters. While a case could be made that such inclusions would be either overkill or lead to overfitting and problematic convergences, a reimplementation in $RTMB$ makes such adjustments very easy to make.
+
+## Challenges in transposition
+
+### Adjusted profiles for likelihood functions
+In the theoretical framework behind the implementation of MAGD in *CatDyn*, it is proposed the use of adjusted likelihood functions for normal and lognormal distributions were the dispersion parameter is removed in order to facilitate the estimation process. Custom likelihood functions have historically been problematic in TMB (as of today, *dgamma()* is still broken) so porting this functionality is not guaranteed to work.
+
+# Functionality
+
+## Objective function
+
+The objective function constitutes the calculation of the mean of the statistical process that is being modeled, and is the basis against which the parameters are optimized. According to several papers publised by the author, the process models catch at time $t$, $C_t$ and can be described as:
+
+\begin{equation}
+    \begin{aligned}
+    \label{eq:catdyn_2}
+C_t = kE_t^\alpha  m \left( N_0 e^{-Mt} -m \left[ \sum_{i=i}^{i=t-1} C_{i,i} e^{-M(t-i-1)} \right] + \sum_{j=1}^{j=u} I_j R_j e^{-M(t-\tau_j)} - \sum_{l=1}^{l=v} J_l S_l e^{-M(t-\upsilon_l} \right) ^ \beta
+    \end{aligned}
+\end{equation}
+
+In $R$, the objective function is stated both in the *CatDynPred()* and in the several .CDMN auxiliary functions. No differences were detected in the implementations on each case, and it can be abbreviated as such: 
 
 ```{r}
+#| eval: false
+  mccum[1] = 0
+  nstep[1] = N0 * exp(-M)
+  for(i in 2:nT){
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
+    nstep[i] = N0 * exp(-M*i) + 
+      sum(I[i,] * Rt * exp(-M*(i-(u-1)+1))) -
+      mccum[i] * exp(-M/2)
+    effeff1 <- Et^(alpha)
+    effn1 <- nstep^(beta)
+    predcat <- K * (effeff1 * effn1) * exp(-M/2)
+  }
+```
 
-#| results: hide
+Which could be synthesized as:
+
+\begin{equation}
+\begin{aligned}
+\text{mccum}_1 &= 0 \\
+n_{\text{step},1} &= N_0 \cdot e^{-M} \\
+\text{mccum} &= \sum_{i=2}^{n_T} C_{i-1} + \text{mccum}_{i-1} \cdot e^{-M} \\
+\text{for } i &= 2 \text{ to } n_T: \\
+n_{\text{step},i} &= N_0 \cdot e^{-Mi} + \sum_{u} I_{i,u} \cdot R_t \cdot e^{-M(i - (u - 1) + 1)} - \text{mccum}_i \cdot e^{-M/2} \\
+\text{predcat} &= K \cdot  E_t^\alpha \cdot n_{\text{step}}^\beta \cdot e^{-M/2}
+\end{aligned}
+\end{equation}
+
+Despite the differences in the indexation, it can be shown that this objective function and *CatDynPred()* (and later *CatDynFit()*) are numerically equivalent: First we load the data:
+
+```{r}
+# Blue shark example
 tibec.14.22.pg.1 <- read.csv("WS/tibec.14.22.pg.1.csv",header=TRUE)
 
-tibec.14.22.pg.2 <- as.CatDynData(x=tibec.14.22.pg.1,
+tibec.14.22.pg.2 = as.CatDynData(x=tibec.14.22.pg.1,
                                   step="month",
                                   fleet.name=c("Pelagic"),
                                   coleff=4,
@@ -181,6 +238,51 @@ tibec.14.22.pg.2 <- as.CatDynData(x=tibec.14.22.pg.1,
                                   unitsmbw="kg",
                                   nmult="thou",
                                   season.dates=c("2014-01-01","2022-12-31"))
+
+
+# Lobster example
+cateff1.Crusoe <- read.csv("WS/RobinsonCrusoeLobster.csv",header=TRUE)
+#
+################################################################################
+# 2.- Stock assessment                                                         #
+################################################################################
+#
+################################################################################
+# 2.1.- Robinson Crusoe                                                        #
+################################################################################
+#
+################################################################################
+# 2.1.1.- Depletion models season: 2002-2003                                   #
+################################################################################
+#
+# Data object
+jflcrusoe0203  <- as.CatDynData(x=cateff1.Crusoe[cateff1.Crusoe$Season==1,],
+                                step="week",
+                                fleet.name="nasas",
+                                coleff=4,
+                                colcat=5,
+                                colmbw=6,
+                                unitseff="ndays",
+                                unitscat="kg",
+                                unitsmbw="g",
+                                nmult="thou",
+                                season.dates=c("2002-09-28","2003-05-22"))
+```
+
+Then we can compare both approaches:
+
+
+
+- Default order is $M$, $N_0$, $R_t$, $k$, $\alpha$, $\beta$ and $\psi$
+
+# Blue Shark Example
+
+## CatDyn (Example from Workshop)
+
+```{r}
+#| eval: false
+#| results: hide
+
 
 P1.Pelagic  <- 12  #2014
 P2.Pelagic  <- 24  #2015
@@ -284,6 +386,7 @@ tibec.14.22.pg.apn.1.bsd %>%
 
 ```{r}
 #| results: hide
+#| eval: false
 
 dat = list()
 dat$Ct = as.vector(tibec.14.22.pg.2$Data$Pelagic$obscat.thou)         # observed catch
@@ -432,7 +535,7 @@ predicted_catch = obj7$report()$predcat
 ```{r}
 #| output: asis
 #| echo: false
-
+#| eval: false
 cat_pars_1 = tibec.14.22.pg.apn.1.fit$Model$CG$bt.par
 
 xtable(data.frame(
@@ -511,6 +614,7 @@ ggplot() +
 ```
 
 ```{r}
+#| eval: false
 # tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results['Predicted.Catch.thou']
 # catch
 
@@ -545,32 +649,8 @@ ncol=1)
 Estimativas divergiram até baixar N0.ini de 5* para 3*
 
 ```{r}
-cateff1.Crusoe <- read.csv("WS/RobinsonCrusoeLobster.csv",header=TRUE)
-#
-################################################################################
-# 2.- Stock assessment                                                         #
-################################################################################
-#
-################################################################################
-# 2.1.- Robinson Crusoe                                                        #
-################################################################################
-#
-################################################################################
-# 2.1.1.- Depletion models season: 2002-2003                                   #
-################################################################################
-#
-# Data object
-jflcrusoe0203  <- as.CatDynData(x=cateff1.Crusoe[cateff1.Crusoe$Season==1,],
-                                step="week",
-                                fleet.name="nasas",
-                                coleff=4,
-                                colcat=5,
-                                colmbw=6,
-                                unitseff="ndays",
-                                unitscat="kg",
-                                unitsmbw="g",
-                                nmult="thou",
-                                season.dates=c("2002-09-28","2003-05-22"))
+#| eval: false
+
 #
 # plot(x=jflcrusoe0203,mark=TRUE,offset=c(9,10),hem="S")                          # 43 51 candidate input weeks
 #
@@ -613,7 +693,7 @@ jfldesvent1112.2P.1.apn.fit  <- CatDynFit(x=jflcrusoe0203,
 
 ```{r}
 #| results: hide
-
+#| eval: false
 dat = list()
 dat$Ct = as.vector(jflcrusoe0203$Data$nasas$obscat.thou)         # observed catch
 dat$Et = as.vector(jflcrusoe0203$Data$nasas$obseff.ndays)       # effort
@@ -761,7 +841,7 @@ CatDynPred(jfldesvent1112.2P.1.apn.fit, method = 'CG')$Model$Results['Observed.C
 
 ```{r}
 #| include: false
-
+#| eval: false
 report_2 = report_manual(p = 2,
               method = 'CG',
               opt_result = CG2,
@@ -780,7 +860,7 @@ report_2$CG$bt.par
 ```{r}
 #| output: asis
 #| echo: false
-
+#| eval: false
 cat_pars_2 = jfldesvent1112.2P.1.apn.fit$Model$CG$bt.par
 
 xtable(data.frame(
@@ -840,6 +920,7 @@ ggplot() +
 ```
 
 ```{r}
+#| eval: false
 # tibec.14.22.pg.apn.1.fit.pred.CG$Model$Results['Predicted.Catch.thou']
 # catch
 
@@ -875,7 +956,7 @@ ncol=1)
 ## CatDyn
 
 ```{r}
-
+#| eval: false
 cat_df = as.CatDynData(x=df_effort %>%
                          filter(as.numeric(
                            as.character(year_sale)) %in% c(2006:2023)),
@@ -973,6 +1054,7 @@ catch_occ = unlist(CatDynPred(x=fit_occ$fit,method="CG")$Model$Results['Predicte
 ## RTMB
 
 ```{r}
+#| eval: false
 par$logN0_scaled
 
 jnll = function(par) {
@@ -1087,6 +1169,7 @@ predicted_catch_3 = obj3$report()$predcat
 ```
 
 ```{r}
+#| eval: false
 report_3 = report_manual(p = 18,
               method = 'CG',
               opt_result = CG3,
@@ -1105,7 +1188,7 @@ report_3$CG$bt.par
 ```{r}
 #| output: asis
 #| echo: false
-
+#| eval: false
 cat_pars_3 = fit_occ$fit$Model$CG$bt.par
 
 xtable(data.frame(
