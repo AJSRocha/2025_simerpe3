@@ -272,10 +272,8 @@ jflcrusoe0203  <- as.CatDynData(x=cateff1.Crusoe[cateff1.Crusoe$Season==1,],
 
 Then we can compare both approaches:
 
-```{r}
+```{r blueshark}
 #| echo: false
-df = tibec.14.22.pg.2
-
 P1.Pelagic  <- 12  #2014
 P2.Pelagic  <- 24  #2015
 P3.Pelagic  <- 36  #2016
@@ -385,15 +383,101 @@ predcat = vector("numeric", nT) * alpha.ini.Pelagic
   
 ggplot() + 
   geom_line(aes(x = 1:108,
-                y = simul_catdyn)) + 
+                y = simul_catdyn),
+            linewidth = 1.5) + 
   # geom_line(aes(x = 1:108,
   # y = rnorm(108,catch,sdCt)), col = 'red') + 
   geom_line(aes(x = 1:108,
                 y = predcat), col = 'red',
-            linetype = 'dashed') + 
+            linetype = 'dashed', linewidth = 1.5) + 
+  labs(title = "CatDyn (black) and custom objective function (red dashed)") + 
   theme_bw()
   
 ```
+
+```{r lobster}
+M.ini       <- 10*0.001937482
+N0.ini      <- 3*9.210188
+P1.ini      <- 45
+P2.ini      <- 20
+k.ini       <- 8.5e-4                                                           # always between 1e-3 and 1e-6
+alpha.ini   <- 1                                                                # always close to 1
+beta.ini    <- 1                                                                # always close to 1
+psi.ini = 0.25*sd(jflcrusoe0203$Data$nasas$obscat.thou[jflcrusoe0203$Data$nasas$obscat.thou>0])^2
+pars.ini.2P <- log(c(M.ini,N0.ini,P1.ini,P2.ini,k.ini,alpha.ini,beta.ini, psi.ini))
+#
+dates.2P    <- c(head(jflcrusoe0203$Data$nasas$time.step,1),                   # now the dates vector also has
+                 41,
+                 49,                                                            # the week of one input of abundance
+                 tail(jflcrusoe0203$Data$nasas$time.step,1))
+#
+# jfldesvent1112.2P.apn.ini <- catdynexp(x=jflcrusoe0203,
+#                                        p=2,
+#                                        par=pars.ini.2P,
+#                                        dates=dates.2P,
+                                       # distr="normal")
+#
+
+
+jfldesvent1112.2P.1.apn.exp  <- catdynexp(x=jflcrusoe0203,
+                                          p=2,
+                                          par=pars.ini.2P,
+                                          dates=dates.2P,
+                                          distr="normal")
+
+simul_catdyn = jfldesvent1112.2P.1.apn.exp$Model$Results$Predicted.Catch.thou
+
+#################################################
+
+
+Ct = as.vector(jflcrusoe0203$Data$nasas$obscat.thou)         # observed catch
+Et = as.vector(jflcrusoe0203$Data$nasas$obseff.ndays)       # effort
+u = c(41,49) - jflcrusoe0203$Data$nasas$time.step[1] + 1                       # recruitment pulse months
+nT = length(Ct)
+nR = length(u)
+
+
+I = matrix(0, nrow = nT, ncol = nR)
+for (j in 1:nR) {
+  I[(u[j]-1):nT, j] <- 1 # -1 foi adicionado para ficar consistente com CatDyn.
+}
+
+
+Rt = c(P1.ini, P2.ini)
+
+nstep <- vector("numeric", nT) * alpha.ini.Pelagic #init vector
+mccum = vector("numeric", nT) * alpha.ini.Pelagic 
+effeff1 = vector("numeric", nT) * alpha.ini.Pelagic 
+effn1 = vector("numeric", nT) * alpha.ini.Pelagic 
+predcat = vector("numeric", nT) * alpha.ini.Pelagic 
+
+
+    mccum[1] = 0
+  nstep[1] = N0.ini * exp(-M.ini)
+  for(i in 2:nT){
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M.ini)
+    nstep[i] = N0.ini * exp(-M.ini*i) + 
+      sum(I[i,] * Rt * exp(-M.ini*(i-(u-1)+1))) -
+      mccum[i] * exp(-M.ini/2)
+    effeff1 <- Et^(alpha.ini )
+    effn1 <- nstep^(beta.ini )
+    predcat = k.ini  * (effeff1 * effn1) * exp(-M.ini/2)
+  }
+  
+  
+ggplot() + 
+  geom_line(aes(x = 1:36,
+                y = simul_catdyn),
+            linewidth = 1.5) + 
+  # geom_line(aes(x = 1:108,
+  # y = rnorm(108,catch,sdCt)), col = 'red') + 
+  geom_line(aes(x = 1:36,
+                y = predcat), col = 'blue',
+            linetype = 'dashed', linewidth = 1.5) + 
+  labs(title = "CatDyn (black) and custom objective function (blue dashed)") + 
+  theme_bw()
+```
+
 
 
 - Default order is $M$, $N_0$, $R_t$, $k$, $\alpha$, $\beta$ and $\psi$
