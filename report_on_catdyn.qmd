@@ -21,6 +21,8 @@ biblatexoptions:
 author:
   - name: "Alberto Rocha \\thanks{Instituto Português do Mar e da Atmosfera}"
     corresponding: true
+  - name: "Diana Feijó \\thanks{Instituto Português do Mar e da Atmosfera}"
+    corresponding: false   
   - name: "Ana Moreno \\thanks{Instituto Português do Mar e da Atmosfera}"
     corresponding: false
 number-sections: true
@@ -158,8 +160,40 @@ report_manual = function(p, method, dates,
 # Introduction
 Multi-annual generalized depletion models (MAGD) currently available in the package *CatDyn* rank among the most interesting and promising tools for stock assessment. These models focus on modelling catch dynamics (hence the name) and can serve as a solid base for estimates for biomass assessment models. In the current version of the package, they suffer from a series of constraints caused by the structure of the package that limits their applicability. The goal of this report is to document the transition of the *CatDyn* workflow to a more generalized *RTMB* approach.  
 
-Throughout this document, two example datasets will be used. Both datasets were presented by the $CatDyn$ package author during a workshop on this methodology. 
+Throughout this document, two example datasets will be used. Both datasets were presented by the $CatDyn$ package author during a workshop on this methodology. They will be reffered throughout the document as dataset 1 (regarding a blue shark fishery) and dataset 2 (concerning a lobster fishery). 
 
+## The moving pieces in *CatDyn*
+
+In *CatDyn*, we model catch dynamics, instead of stock biomass dynamics. The core formulation is as such:
+
+\begin{equation}
+    \begin{aligned}
+    \label{eq:catdyn_1}
+C_t = kE_t^\alpha  N_t ^ \beta
+    \end{aligned}
+\end{equation}
+
+Where $k$ is a constant for scaling, $E_t$ recorded effort at timestep $t$ and $N_t$ biomass (in numbers) at timestep $t$. While $E_t$ consists of observations, $N_t$ must be estimated for each timestep. In discrete time, the model becomes
+
+@TODO alpha
+@TODO beta
+
+\begin{equation}
+    \begin{aligned}
+    \label{eq:catdyn_2}
+C_t = kE_t^\alpha  m \left( N_0 e^{-Mt} -m \left[ \sum_{i=i}^{i=t-1} C_{i,i} e^{-M(t-i-1)} \right] + \sum_{j=1}^{j=u} I_j R_j e^{-M(t-\tau_j)} - \sum_{l=1}^{l=v} J_l S_l e^{-M(t-\upsilon_l} \right) ^ \beta
+    \end{aligned}
+\end{equation}
+
+In this version, $N_t^\beta$ is replaced by $m \cdot N(t, ...)^\beta$ where $N(t)$, the estimate of number of individuals alive at time $t$ is a function $f(t, N_0, M, I, R, J, S, u, v, \tau, \upsilon)$. In this approach, some key parameters are introduced:
+
+* $N_0$ is the estimate for the initial estate of the biomass; as we will discuss below, it is an extremely sensitive parameter #TODO terminar
+
+* $M$ is natural mortality rate; a common practice is to get initial values for this parameter from the literature. $m$ evaluates to $e^{\left( - \frac{M}{2} \right)}$ and is a correction used in some components of the model to make the catch happen at the middle of the time step.
+
+* $R_u$ and $S_v$ are vectors of perturbation amplitudes at time steps $u$ and $v$. $u$ and $v$ are input as vectors of perturbation timings. A big part of the fitting process involves deciding the timing of the perturbations by visual inspection of the data series, manually creating the timing vectors $u$ and $v$ and determining initial estimates for perturbation amplitudes in the vectors $R$ and $S$. In this context, positive perturbations can correspond to events such as recruitment pulses and imigration fluxes and negative perturbations can be associated with emigration events.
+
+* $I_j$ and $J_l$ and index matrices, that according to the documentation take the value of 0 when the timestep being evaluated is earlier than the perturbation index and 1 afterwards. This would act as a switch for the perturbations. We will discuss the nuances of the implementation of these matrices below.
 
 ## Current limitations in *CatDyn*.
 While *CatDyn*, as of version 1.1-1, is a fantastical piece of software, it suffers from some limitations that could be adressed by a diferent approach to implementation:
@@ -182,16 +216,11 @@ In the theoretical framework behind the implementation of MAGD in *CatDyn*, it i
 
 ## Objective function
 
-The objective function constitutes the calculation of the mean of the statistical process that is being modeled, and is the basis against which the parameters are optimized. According to several papers publised by the author, the process models catch at time $t$, $C_t$ and can be described as:
+The objective function constitutes the calculation of the mean of the statistical process that is being modeled, and is the basis against which the parameters are optimized. According to several papers published by the author, the process models catch at time $t$, $C_t$ and was already described in \ref{eq:catdyn_2}:
 
-\begin{equation}
-    \begin{aligned}
-    \label{eq:catdyn_2}
-C_t = kE_t^\alpha  m \left( N_0 e^{-Mt} -m \left[ \sum_{i=i}^{i=t-1} C_{i,i} e^{-M(t-i-1)} \right] + \sum_{j=1}^{j=u} I_j R_j e^{-M(t-\tau_j)} - \sum_{l=1}^{l=v} J_l S_l e^{-M(t-\upsilon_l} \right) ^ \beta
-    \end{aligned}
-\end{equation}
 
-In $R$, the objective function is stated both in the *CatDynPred()* and in the several .CDMN auxiliary functions. No differences were detected in the implementations on each case, and it can be abbreviated as such: 
+
+In $R$, the objective function is stated both in the *CatDynExp()* and in the several .CDMN auxiliary functions. No differences were detected in the implementations on each case, and it can be abbreviated as such: 
 
 ```{r}
 #| eval: false
