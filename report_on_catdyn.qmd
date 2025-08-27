@@ -54,6 +54,9 @@ library(tmbstan)
 library(shinystan)
 library(optimx)
 
+library(purrr)
+library(Runuran)
+
 source('scripts/custom_catdyn_fit.R')
 source('scripts/custom_catdyn_bsd.R')
 source('scripts/funcoes_catdyn.R')
@@ -510,6 +513,370 @@ ggplot() +
 
 
 - Default order is $M$, $N_0$, $R_t$, $k$, $\alpha$, $\beta$ and $\psi$
+
+
+# VMA example:
+
+```{r}
+load("data/bio_final1.RData")
+load('data/vd.Rdata')
+
+bio = bio %>% 
+  mutate (zona = tolower(zona)) 
+
+portos = c("AVE", "FIG", "MAT", "PEN", "POR", "POV", "SES", "SIN", "VSA", "OLH")
+
+bio_data = bio %>% 
+  filter(especie == 'mas') %>% 
+  mutate(mes = substr(data, 6,7),
+         EGRUPART = case_when(arte_eu == 'DTRAWL' |
+                                grepl('OTB', arte_eu) ~ 'OTB',
+                              grepl('PS', arte_eu) ~ 'PS',
+                              T ~ 'MIS_MIS')) 
+
+
+new_mes = data.frame(mes = 1:12)
+
+
+cobaia = bio_data %>%
+  group_by(EGRUPART) %>% 
+  nest() %>%
+  mutate(
+    ajuste = map(data, ~ loess(pesototal ~ mes, data = .x, degree = 2)),
+    predicos = map(ajuste, ~ predict(.x, newdata = new_mes, se = TRUE)),
+    pred_df = map(predicos, ~ data.frame(
+      mes = new_mes$mes,
+      res = .x$fit,
+      res.se = .x$se.fit
+    ))
+  )
+
+predicos = cobaia %>%
+  select(EGRUPART, pred_df) %>%
+  unnest(pred_df)
+
+
+vd = df %>% 
+  filter(!is.na(EGRUPART)) %>% 
+  group_by(EGRUPART, year_sale, month_sale) %>% 
+  summarise(land = sum(land),
+            effort = n()) %>% 
+  left_join(., predicos %>%
+  mutate(mes = stringr::str_pad(mes, 2, pad = "0")),
+            by = c('month_sale' = 'mes',
+                   'EGRUPART' = 'EGRUPART'))
+
+vd = vd %>%
+  rowwise() %>%
+  mutate(mbw_rand = urnorm(1, mean = res, sd = 6*res.se)) %>%
+  ungroup()
+
+```
+
+
+```{r}
+# 2.5.1. Exploratory analysis for initial values   
+
+vd_wide = pivot_wider(vd,
+                      values_from = c(land, effort, res, res.se, mbw_rand),
+                      names_from = EGRUPART,
+                      id_expand = F) %>% 
+    mutate(land_OTB = case_when(is.na(land_OTB) ~0, T ~ land_OTB),
+         effort_OTB = case_when(is.na(effort_OTB)~0, T ~ effort_OTB),
+         land_PS = case_when(is.na(land_PS)~0, T ~ land_PS),
+         effort_PS = case_when(is.na(effort_PS)~0, T ~ effort_PS))
+
+vd_wide[is.na(vd_wide)] = 1
+
+vma_1 <- as.CatDynData(x=vd_wide %>% filter (year_sale %in% c(1995:2019)), # atencao filtro anos
+                      step="month",
+                      fleet.name=c("PS"), #"OTB", MIS_MIS precisa de ser incluido
+                      coleff=c(5), #numero coluna aonde estao dados effort
+                      colcat=c(8), #numero coluna aonde estao dados catch
+                      colmbw=c(14), #numero coluna aonde estao dados peso med
+                      unitseff="ntrips",
+                      unitscat="kg", # ton or kg, precisamos def correctamente aqui
+                      unitsmbw="g", # kg or g
+                      nmult="mill", #num multiplier 
+                      season.dates=c("1995-01-01","2019-12-31")) #é uma label
+
+
+
+
+```
+
+
+```{r}
+P1.PS <- 7   #1995
+P2.PS <- 19  #1996
+P3.PS <- 31  #1997
+P4.PS <- 43  #1998 
+P5.PS <- 55  #1999 
+P6.PS <- 68  #2000
+P7.PS <- 79  #2001 
+P8.PS <- 91  #2002
+P9.PS <- 103 #2003
+P10.PS <- 116  #2004
+P11.PS <- 127  #2005
+P12.PS <- 139  #2006
+P13.PS <- 150  #2007 
+P14.PS <- 163  #2008 
+P15.PS <- 174  #2009
+P16.PS <- 186  #2010 
+P17.PS <- 198  #2011
+P18.PS <- 210  #2012
+P19.PS <- 220  #2013
+P20.PS <- 234  #2014
+P21.PS <- 246  #2015
+P22.PS <- 261  #2016 
+P23.PS <- 270  #2017 
+P24.PS <- 282  #2018
+P25.PS <- 294  #2019 
+# P26.PS <- 307  #2020
+# P27.PS <- 319  #2021 
+# P28.PS <- 330  #2022
+# P29.PS <- 344  #2023 
+# P30.PS <- 357  #2024
+
+vma_1.dates.1  <- c(head(vma_1$Data[[1]]$time.step,1),
+                             P1.PS,
+                             P2.PS,
+                             P3.PS,
+                             P4.PS,
+                             P5.PS,
+                             P6.PS,
+                             P7.PS,
+                             P8.PS,
+                             P9.PS,
+                             P10.PS,
+                             P11.PS,
+                             P12.PS,
+                             P13.PS,
+                             P14.PS,
+                             P15.PS,
+                             P16.PS,
+                             P17.PS,
+                             P18.PS,
+                             P19.PS,
+                             P20.PS,
+                             P21.PS,
+                             P22.PS,
+                             P23.PS,
+                             P24.PS,
+                             P25.PS,
+                             # P26.PS,
+                             # P27.PS,
+                             # P28.PS,
+                             # P29.PS,
+                             # P30.PS,
+                             tail(vma_1$Data[[1]]$time.step,1))
+```
+
+
+```{r}
+
+max.age   <- 13
+time.step <- "month"
+M.Hoenig(max.age,time.step) 
+
+#  M.pred.month M.pred.SE.month
+# 1   0.02461961     0.004211484
+
+```
+
+```{r}
+
+x <- data.frame(key=sort(rep(1:25,12)), # corrigido de 30 para 25
+                x=vma_1$Data$PS$obscat.mill)
+
+agr_x = aggregate(x$x,
+          list(x$key),
+          sum)
+
+max(agr_x$x) # N0.ini tem de ser superior a isto
+
+rm(x)
+
+```
+
+# definir os dados iniciais
+
+```{r}
+
+ampl_factor = 1
+
+M.ini       <- 0.024 *ampl_factor #natural mortality rate 
+N0.ini      <- 100 *ampl_factor # mesma unidade de nmult e maior max(agr_x)
+P1.ini.PS   <- 5 *ampl_factor #1995 #recrutamento para pescaria e nao no ambiente
+P2.ini.PS   <- 5 *ampl_factor 
+P3.ini.PS   <- 5 *ampl_factor 
+P4.ini.PS   <- 5 *ampl_factor 
+P5.ini.PS   <- 10 *ampl_factor
+P6.ini.PS   <- 6 *ampl_factor
+P7.ini.PS   <- 35 *ampl_factor
+P8.ini.PS   <- 15 *ampl_factor 
+P9.ini.PS   <- 15 *ampl_factor 
+P10.ini.PS   <- 5 *ampl_factor 
+P11.ini.PS   <- 5 *ampl_factor  
+P12.ini.PS   <- 5 *ampl_factor  
+P13.ini.PS   <- 5 *ampl_factor  
+P14.ini.PS   <- 5 *ampl_factor  
+P15.ini.PS   <- 10 *ampl_factor 
+P16.ini.PS   <- 6 *ampl_factor 
+P17.ini.PS   <- 35 *ampl_factor
+P18.ini.PS   <- 15 *ampl_factor
+P19.ini.PS   <- 15 *ampl_factor
+P20.ini.PS   <- 15 *ampl_factor
+P21.ini.PS   <- 5 *ampl_factor
+P22.ini.PS   <- 5 *ampl_factor
+P23.ini.PS   <- 5 *ampl_factor
+P24.ini.PS   <- 5 *ampl_factor
+P25.ini.PS   <- 10 *ampl_factor # 2019
+# P26.ini.PS   <- 6  
+# P27.ini.PS   <- 35 
+# P28.ini.PS   <- 15 
+# P29.ini.PS   <- 15 
+# P30.ini.PS   <- 15 # 2024
+k.ini.PS    <- 2e-2 # catchbility
+alpha.ini.PS<- .2 # gear is signertic = 2, change 1 to 2
+beta.ini.PS <- .2
+
+
+
+psi.ini.PS    <- 0.25*sd(vma_1$Data$PS$obscat.mill[vma_1$Data$PS$obscat.mill>0])^2
+psilog.ini.PS <- 0.25*sd(log(vma_1$Data$PS$obscat.mill[vma_1$Data$PS$obscat.mill>0]))^2
+
+vma_1.pars.ini <- log(c(M.ini,
+                                 N0.ini,
+                                 P1.ini.PS,
+                                 P2.ini.PS,
+                                 P3.ini.PS,
+                                 P4.ini.PS,
+                                 P5.ini.PS,
+                                 P6.ini.PS,
+                                 P7.ini.PS,
+                                 P8.ini.PS,
+                                 P9.ini.PS,
+                                 P10.ini.PS,
+                                 P11.ini.PS,
+                                 P12.ini.PS,
+                                 P13.ini.PS,
+                                 P14.ini.PS,
+                                 P15.ini.PS,
+                                 P16.ini.PS,
+                                 P17.ini.PS,
+                                 P18.ini.PS,
+                                 P19.ini.PS,
+                                 P20.ini.PS,
+                                 P21.ini.PS,
+                                 P22.ini.PS,
+                                 P23.ini.PS,
+                                 P24.ini.PS,
+                                 P25.ini.PS,
+                                 # P26.ini.PS,
+                                 # P27.ini.PS,
+                                 # P28.ini.PS,
+                                 # P29.ini.PS,
+                                 # P30.ini.PS,
+                                 k.ini.PS,
+                                 alpha.ini.PS,
+                                 beta.ini.PS,
+                                 psi.ini.PS,
+                                 psilog.ini.PS
+                        ))
+
+vma_1.ini.apn <- catdynexp(x=vma_1,                                 
+                        p=c(25), # contar num pertubacao no plot inicial
+                        par=vma_1.pars.ini[1:(length(vma_1.pars.ini)-2)], #vector num parametros
+                        dates=vma_1.dates.1,
+                        distr= c("apnormal")) #tem de ser definida 1 senao n faz
+
+# Error in catdynexp(x = vma_1, p = c(25), par = vma_1.pars.ini[1:length(vma_1.pars.ini)],  : 
+  # For a 1-fleet 25 perturbation fit with poisson or adjusted profile likelihood par must be a vector of length 30
+
+# Error in uniroot(.F.explotrate, c(1e-09, 10), exp(par[1]), obsexplot.n[t],  : 
+#   no sign change found in 1000 iterations
+
+
+
+plot(x=vma_1.ini.apn,
+     leg.pos="topleft",
+     Biom.tstep=1,
+     Biom.xpos=0.70,
+     Biom.ypos=0.95,
+     Cat.tstep=12,
+     Cat.xpos=0.75,
+     Cat.ypos=0.85)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # Blue Shark Example
 
