@@ -39,6 +39,7 @@ tinytex::tlmgr_update()
 
 library(CatDyn)
 library(RTMB)
+library(optimx)
 library(wesanderson)
 library(tidyverse)
 library(xtable)
@@ -55,78 +56,39 @@ load('data/mbw_model.Rdata')
 mod_aux = lm(df_effort$catch ~ df_effort$effort)
 
 # Fix a couple of outliers
+
+# df_effort =
+#   vd %>%
+#   group_by(year_sale, month_sale, IEMBARCA, PORTO) %>%
+#   summarise(Power.Main.raw = mean(Power.Main, na.rm = T),
+#             Power.main = trunc(Power.Main.raw/50) * 50,
+#             catch_i = sum(QVENDA[EGRUPART == 'MIS_MIS']),
+#             catch_i_otb = sum(QVENDA),
+#             effort_i = n_distinct(IDATVEND[EGRUPART == 'MIS_MIS']),
+#             effort_i_otb = n_distinct(IDATVEND))
+
+
 df_effort = 
   df_effort %>% 
-  mutate(catch = case_when(year_sale == 2005 &
-                             month_sale == '09' ~
-                             effort * mod_aux$coefficients[2] +
-                             mod_aux$coefficients[1],
-                           T ~ catch),
-         catch_otb = case_when(year_sale == 2005 &
-                                 month_sale == '09' ~
-                                 effort_otb * mod_aux$coefficients[2] +
-                                 mod_aux$coefficients[1],
-                               T ~ catch_otb)) %>% 
-  mutate(catch_otb = case_when(catch_otb == 0 ~ mean(catch_otb), 
-                               T ~ catch_otb),
-         effort_otb = case_when(effort_otb  < 150 ~ mean(effort_otb),
-                                T ~ effort_otb))
-
-```
-
-
-
-
-
-```{r}
-par = list(
-  # logRt_scaled = log(rep(50000,18)),
-  logRt_scaled = log( c(57744,40315,3534,21558,2766,
-                     9.735,55453,3438,16525,10746,
-                     14552,2524,22789,12567,34463,
-                     15000,15000,15000)),
-  logalpha      = log(1.1),
-  logbeta       = log(0.6),
-  logK          = log(0.00003),
-  logN0_scaled  = log(50000),
-  logM          = log(0.05),
-  logsdCt       = log(0.25 * sd(dat$Ct[dat$Ct > 0]))  # consistent with CatDyn
-)
-
-indice_manual =
-  list(
-    10,11,12,
-    12,12,10,11,12,
-    11,10,12,7,10,
-    12,11,12,12,10)
-
-for(i in 0:(length(indice_manual)-1)){
-  indice_manual[[i+1]] = 12*i + indice_manual[[i+1]]
-}
-```
-
-```{r}
-exp_cat = 
-catdynexp(cat_df, 18, c(par$logM, par$logN0_scaled, par$logRt_scaled, par$logK, par$logalpha, par$logbeta, par$logsdCt), 
-          c(head(cat_df$Data[[1]]$time.step,1),
-               unlist(indice_manual), #estimativa do timing da perturbacao
-              tail(cat_df$Data[[1]]$time.step,1)),
-          distr = 'normal')
-
-exp_cat$Model$Results$Predicted.Catch.thou
-
-ggplot() + 
-  geom_line(aes(x = 1:216,
-                y = exp_cat$Model$Results$Predicted.Catch.thou), col = 'red') + 
-    geom_line(aes(x = 1:216,
-                y = exp_cat$Model$Results$Observed.Catch.thou))
-```
-
-
-```{r}
+  # mutate(catch = case_when(year_sale == 2005 &
+  #                            month_sale == '09' ~
+  #                            effort * mod_aux$coefficients[2] +
+  #                            mod_aux$coefficients[1],
+  #                          T ~ catch),
+  #        catch_otb = case_when(year_sale == 2005 &
+  #                                month_sale == '09' ~
+  #                                effort_otb * mod_aux$coefficients[2] +
+  #                                mod_aux$coefficients[1],
+  #                              T ~ catch_otb)) %>% 
+  mutate(catch_otb = case_when(catch_otb == 0 ~ 0.1, 
+                               T ~ catch_otb)
+         # effort_otb = case_when(effort_otb  < 150 ~ mean(effort_otb),
+         #                        T ~ effort_otb)
+                                )
+                                
 cat_df = as.CatDynData(x=df_effort %>%
                          filter(as.numeric(
-                           as.character(year_sale)) %in% c(2006:2023)),
+                           as.character(year_sale)) %in% c(2006:2020)),
                        step="month",
                        fleet.name="MIS+OTB-S",
                        coleff=6,
@@ -137,44 +99,233 @@ cat_df = as.CatDynData(x=df_effort %>%
                        unitsmbw="kg",
                        nmult="thou",
                        season.dates=c(as.Date("2006-01-01"),
-                                      last_date_of_week(2023, 52)-1))
+                                      last_date_of_week(2020, 52)-1))
 
+report_manual = function(p, method, dates,
+                         distr, fleet.name, par.tmp,
+                         opt_result){
+  results2 = vector("list", length(method))
+      names(results2) = method
+      temp = attr(opt_result, "details")
+      for (i in 1:length(method)) {
+        results2[[i]]$Type <- p
+        results2[[i]]$Dates <- dates
+        names(results2[[i]]$Dates) <- c("ts.start",
+                                        paste0('ts.', seq(1:p)),
+                                        "ts.end")
+        results2[[i]]$Distr <- distr
+        par.names <- c("M", "N0", paste0('P', seq(1:p), ".", rep(fleet.name,p)),
+                       paste(c("k.", "alpha.", "beta."), fleet.name, sep = ""))
+        
+        if (distr %in% c("negbin", "normal" ,
+                         "lognormal",  "gamma",
+                         "roblognormal", "gumbel")) {
+          par.names <- c(par.names, paste("psi.", fleet.name, 
+            sep = ""))
+        }
+        
+        results2[[i]]$converg <- "FAIL"
+        results2[[i]]$kkt <- NA
+        results2[[i]]$AIC <- NA
+        results2[[i]]$bt.par <- NA
+        results2[[i]]$num.grads <- NA
+        results2[[i]]$bt.stdev <- NA
+        results2[[i]]$Cor <- matrix(NA, length(par.names), 
+          length(par.names))
+        
+        if (length(temp[i, ]$ngatend) == length(par.names) & 
+          !any(is.na(temp[i, ]$nhatend)) & 1/kappa(temp[i, 
+          ]$nhatend) > 1e-15) {
+          results2[[i]]$converg <- opt_result[i, length(par.tmp) + 
+            5]
+          results2[[i]]$kkt <- opt_result[i, (length(par.tmp) + 
+            6):(length(par.tmp) + 7)]
+          results2[[i]]$AIC <- 2 * length(par.tmp) + 2 * 
+            opt_result[i, length(par.tmp) + 1]
+          results2[[i]]$bt.par <- exp(opt_result[i, (1:length(par.tmp))])
+          results2[[i]]$num.grads <- temp[i, ]$ngatend
+          
+          v <- matrix(0, length(par.names), length(par.names))
+          
+          if (distr %in% c("poisson",  "apnormal", "aplnormal")) {
+            v <- deltamethod(
+    g = lapply(paste0('~exp(x', 1:length((par.tmp)-1), ')'), as.formula),
+    mean = as.numeric(opt_result[i, 1:length((par.tmp)-1)]),
+    cov = try(solve(temp[i, ]$nhatend)),
+    ses = FALSE
+)
+          }
+          else {
+            v <- deltamethod(
+            g = lapply(paste0('~exp(x', seq_along(par.tmp), ')'), as.formula),
+            mean = as.numeric(opt_result[i, 1:length(par.tmp)]),
+            cov = try(solve(temp[i, ]$nhatend)),
+            ses = FALSE
+)
+          }
+          results2[[i]]$bt.stdev <- sqrt(diag(v))
+          results2[[i]]$Cor <- cor(v)
+          names(results2[[i]]$num.grads) <- par.names
+          names(results2[[i]]$bt.par) <- par.names
+          names(results2[[i]]$bt.stdev) <- par.names
+          colnames(results2[[i]]$Cor) <- par.names
+          rownames(results2[[i]]$Cor) <- par.names 
+        } else {print('convergencia e meio merdosa')}}
+        return(results2)}      
+```
+
+```{r}
+par = list(
+  logRt_scaled = log(c(5700,40000,3500,
+                       21000,2700,9700,
+                       55000,3400,16500,
+                       10700,14500,2500,
+                       22700,12500,34400)),
+  logalpha      = log(1.14),
+  logbeta       = log(0.6),
+  logK          = log(.000034),
+  logN0_scaled  = log(25000),
+  logM          = log(0.1),
+  logsdCt       = log(0.25 * sd(df_effort$catch[df_effort$catch>0]))  # consistent with CatDyn
+)
+
+
+indice_manual =
+  list(
+    10,11,12,
+    12,12,10,11,12,
+    11,10,12,8,10,
+    12,11)
+
+for(i in 0:(length(indice_manual)-1)){
+  indice_manual[[i+1]] = 12*i + indice_manual[[i+1]]
+}
+
+exp_cat = 
+catdynexp(cat_df, 15, c(par$logM, par$logN0_scaled, par$logRt_scaled, par$logK, par$logalpha, par$logbeta), 
+          c(head(cat_df$Data[[1]]$time.step,1),
+               unlist(indice_manual), #estimativa do timing da perturbacao
+              tail(cat_df$Data[[1]]$time.step,1)),
+          distr = 'aplnormal')
+
+exp_cat$Model$Results$Predicted.Catch.thou
+
+ggplot() + 
+  geom_line(aes(x = 1:180,
+                y = exp_cat$Model$Results$Predicted.Catch.thou), col = 'red') + 
+    geom_line(aes(x = 1:180,
+                y = exp_cat$Model$Results$Observed.Catch.thou)) + theme_bw()
+```
+
+# CatDyn
+
+```{r}
 distribuicoes = c("gamma", "lognormal","normal","negbin","aplnormal", "apnormal")
 optimizadores = c('CG', 'spg', 'BFGS', 'Nelder-Mead')
 
-#first trial
-a = Sys.time()
 fit_null =
   trialer(cat_df,
-           p = 18,
-                M = exp(par$logM),
-                N0.ini = exp(par$logN0_scaled),
-                P = indice_manual,
-                P.ini  = as.list(par$logRt_scaled),
-                k.ini = exp(par$logK),
-                alpha.ini = exp(par$logalpha),
-                beta.ini  = exp(par$logbeta),
-                distr = distribuicoes[3],
-                method = optimizadores[1],
-                itnmax = 10000,
-                disp = list(exp(logsdCt)))
-b = Sys.time()
-b-a
+          p = 15,
+          M = exp(par$logM),
+          N0.ini = exp(par$logN0_scaled),
+          P = indice_manual,
+          P.ini  = as.list(exp(par$logRt_scaled)),
+          k.ini = exp(par$logK),
+          alpha.ini = exp(par$logalpha),
+          beta.ini  = exp(par$logbeta),
+          distr = distribuicoes[5],
+          method = optimizadores[2],
+          itnmax = 10000,
+          disp = list(100))
 
 
 annual_biomass =
-  CatDynBSD(res_06$fit,
-            method = names(res_06$fit$Model),
+  CatDynBSD(fit_null$fit,
+            method = names(fit_null$fit$Model),
             multi = T,
             mbw.sd = predicos$se.fit) %>% 
-  mutate(TimeStep = 216,
-         x =seq(2006,2023+11/12,1/12)) 
+  mutate(TimeStep = 180,
+         x =seq(2006,2020+11/12,1/12)) 
 
-catch_cat = unlist(CatDynPred(x=res_06$fit,method="spg")$Model$Results['Predicted.Catch.thou'])
-
-
+catch_cat = unlist(CatDynPred(x=fit_null$fit,method="spg")$Model$Results['Predicted.Catch.thou'])
+cat_pars_1 = fit_null$fit$Model$spg$bt.par
 ```
 
+```{r}
+ggplot() + 
+  geom_line(aes(x = annual_biomass$x,
+                y = annual_biomass$B.ton,
+                group = 1),
+            size = 1) +
+  geom_ribbon(aes(x = annual_biomass$x,
+                  y = annual_biomass$B.ton,
+                  ymin= annual_biomass$B.ton- 2*annual_biomass$B.ton.SE*0,
+                  ymax= annual_biomass$B.ton+ 2*annual_biomass$B.ton.SE*0),
+              alpha=0.4) +
+ theme_bw()
+  
+  # coord_cartesian(ylim = c(0, 300000), xlim = c(1995,2024)) +
+  theme_bw()
+
+results = fit_null$pred$Model$Results %>% 
+  as.data.frame() %>% 
+  mutate(x = 1:180)
+
+natural_mortality = fit_null$fit$Model$spg$bt.par$M
+natural_mortality_sd = fit_null$fit$Model$spg$bt.stdev[['M']]
+
+results %>% 
+  ggplot() + 
+  geom_line(aes(x = Period.month,
+                y = `Observed.F.1/month`),
+            col = 'tomato',
+            size = 1) +
+  geom_line(aes(x = Period.month,
+                y = `Predicted.F.1/month`),
+            col = 'darkred',
+            size = 1,
+            linetype = 2) + 
+  geom_hline(yintercept = natural_mortality,
+             col = 'darkgreen',
+             size = 1,
+             linetype = 1) +
+  # geom_hline(yintercept = natural_mortality + 2*natural_mortality,
+  #            col = 'darkgreen',
+  #            size = 1,
+  #            linetype = 2) +
+  # geom_hline(yintercept = natural_mortality - 2*natural_mortality,
+  #            col = 'darkgreen',
+  #            size = 1,
+  #            linetype = 2) +
+  theme_bw()
+
+f_m = results$`Observed.F.1/month`/(results$`Observed.F.1/month` + natural_mortality)
+
+f_m_p = results$`Predicted.F.1/month`/(results$`Predicted.F.1/month` + natural_mortality)
+
+results %>% 
+  ggplot() + 
+  geom_line(aes(x = Period.month,
+                y = f_m),
+            col = 'tomato',
+            size = 1) +
+  
+  geom_line(aes(x = Period.month,
+                y = f_m_p),
+            col = 'darkred',
+            size = 1,
+            linetype = 2) + 
+  geom_hline(yintercept = 0.4) + 
+  # geom_line(aes(x = Period.month,
+  #               y = `Observed.F.1/month`/(`Observed.F.1/month`+ natural_mortality)),
+  #           col = 'purple',
+  #           size = 1) +
+  # geom_hline(yintercept = 0.4,
+  #            col = 'darkgreen',
+  #            size = 1,
+  #            linetype = 1) +
+  theme_bw()
+```
 
 
 # RTMB
@@ -264,7 +415,7 @@ predcat = vector("numeric", nT) * alpha
   }
   
   # Negative log-likelihood
-  jnll = -sum(dnorm(Ct, mean = predcat, sd = sdCt, log = TRUE))
+  jnll = -sum(dnorm(log(Ct), mean = log(predcat), sd = logsdCt, log = TRUE))
   # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
     REPORT(predcat)
   jnll
@@ -281,7 +432,7 @@ obj = MakeADFun(jnll, par)
 # Set bounds
 
 Rt_min = 0      # recruitment can't be negative
-Rt_max = 1e8 
+Rt_max = 1e8
 
 lower <- list(
   logRt_scaled = rep(Rt_min, 9),
@@ -296,9 +447,20 @@ upper <- list(
 )
 
 # Run optimizer
-fit = nlminb(obj$par, obj$fn, obj$gr,
-  lower = unlist(lower),
-  upper = unlist(upper))
+# fit = nlminb(obj$par, obj$fn, obj$gr,
+#   lower = unlist(lower),
+#   upper = unlist(upper))
+
+spg1 = optimx(par = obj$par,
+             fn = obj$fn,
+             gr = NULL,
+             method = 'spg',
+             output = 'estimate',
+             hessian = T,
+             itnmax = 50000)
+
+
+
 
 # Retrieve predicted catch
 predicted_catch = obj$report()$predcat
@@ -310,429 +472,118 @@ ggplot() +
   geom_line(aes(x = 1:length(dat$Ct),
                 y = catch_cat)) + 
    geom_line(aes(x = 1:length(dat$Ct),
-                y = predcat), col = 'red') +
+                y = predicted_catch), col = 'red') +
      geom_line(aes(x = 1:length(dat$Ct),
                 y = dat$Ct), linetype = 'dashed')
 ```
 
-\todo[inline]{NaN warnings were also produced here}
+
+```{r}
+# report from catdyn
+fit_null$fit$Model$spg
+
+report_manual(p = 15,
+              method = 'spg',
+              opt_result = spg1,
+              dates=c(1,dat$u,length(dat$Ct)),
+              distr = 'aplnormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par)
+
+catdynpred <- CatDynPred(x=fit_null$fit,method="spg")
+predicted_catch = obj$report()$predcat #RTMB
+
+
+cat_pars_1 = fit_null$fit$Model$spg$bt.par
+
+
+
+
+
+# xtable(data.frame(
+#                   alpha = c(cat_pars_1$`alpha.MIS+OTB-S`, exp(fit$par['logalpha']), exp(CG1['logalpha']) %>% unlist),
+#                   beta = c(cat_pars_1$`beta.MIS+OTB-S`, exp(fit$par['logbeta']), exp(CG1['logbeta'])%>% unlist),
+#                   k = c(cat_pars_1$`k.MIS+OTB-S`, exp(fit$par['logK']), exp(CG1['logK'])%>% unlist),
+#                   M = c(cat_pars_1$`M.MIS+OTB-S`, exp(fit$par['logM']), exp(CG1['logM'])%>% unlist),
+#                   N0 = c(cat_pars_1$`N0.MIS+OTB-S`, exp(fit$par['logN0_scaled']), exp(CG1['logN0_scaled'])%>% unlist),
+#                   SD_Ct = c(cat_pars_1$`psi.MIS+OTB-S`, exp(fit$par["logsdCt"]), exp(CG1["logsdCt"])%>% unlist),
+#                   R1 = c(cat_pars_1$`P1.MIS+OTB-S`,fit$par[3],CG1[3]%>% unlist %>% exp),
+#                   R2 = c(cat_pars_1$`P2.MIS+OTB-S`,fit$par[4],CG1[4]%>% unlist %>% exp),
+#                   R3 = c(cat_pars_1$`P3.MIS+OTB-S`,fit$par[5],CG1[5]%>% unlist %>% exp),
+#                   R4 = c(cat_pars_1$`P4.MIS+OTB-S`,fit$par[6],CG1[6]%>% unlist %>% exp),
+#                   R5 = c(cat_pars_1$`P5.MIS+OTB-S`,fit$par[7],CG1[7]%>% unlist %>% exp),
+#                   R6 = c(cat_pars_1$`P6.MIS+OTB-S`,fit$par[8],CG1[8]%>% unlist %>% exp),
+#                   R7 = c(cat_pars_1$`P7.MIS+OTB-S`,fit$par[9],CG1[9]%>% unlist %>% exp),
+#                   R8 = c(cat_pars_1$`P8.MIS+OTB-S`,fit$par[10],CG1[10]%>% unlist %>% exp),
+#                   R9 = c(cat_pars_1$`P9.MIS+OTB-S`,fit$par[11],CG1[11]%>% unlist %>% exp),
+#                   R10 = c(cat_pars_1$`P10.MIS+OTB-S`,fit$par[12],CG1[12]%>% unlist %>% exp),
+#                   R11 = c(cat_pars_1$`P11.MIS+OTB-S`,fit$par[13],CG1[13]%>% unlist %>% exp),
+#                   R12 = c(cat_pars_1$`P12.MIS+OTB-S`,fit$par[14],CG1[14]%>% unlist %>% exp),
+#                   R13 = c(cat_pars_1$`P13.MIS+OTB-S`,fit$par[15],CG1[15]%>% unlist %>% exp),
+#                   R14 = c(cat_pars_1$`P14.MIS+OTB-S`,fit$par[16],CG1[16]%>% unlist %>% exp),
+#                   R15 = c(cat_pars_1$`P15.MIS+OTB-S`,fit$par[17],CG1[17]%>% unlist %>% exp),
+#                   R16 = c(cat_pars_1$`P16.MIS+OTB-S`,fit$par[18],CG1[18]%>% unlist %>% exp),
+#                   R17 = c(cat_pars_1$`P17.MIS+OTB-S`,fit$par[19],CG1[19]%>% unlist %>% exp),
+#                   R18 = c(cat_pars_1$`P18.MIS+OTB-S`,fit$par[20],CG1[20]%>% unlist %>% exp),
+#                   row.names = c('CatDyn','RTMB', 'RTMB_CG')) %>% t, digits = 8) %>%
+#   print(comment = F,
+#         sanitize.text.function = function(x)
+#           {gsub("_", "\\\\_", x)})
+
+```
+
 
 ```{r}
 #| output: asis
 #| echo: false
-#| warning: false
-summary(sdr7) %>% 
-  as.data.frame() %>% 
-  slice(-c(7:36)) %>%
-  xtable %>% 
-  print(comment = F,
-        sanitize.text.function = function(x) 
-          {gsub("_", "\\\\_", x)})
-```
+#| cap-location: top
 
-```{r}
-# Calculate AIC
-logLik_value7 = -fit7$objective
-k = length(fit7$par)
-aic_value7 = 2 * k - 2 * logLik_value7
-
-# Calculate WAIC
-log_lik7 = numeric(length(dat$Ct))
-
-# Vector of predicted means
-meanvec7 = numeric(1)
-  m = exp(-exp(pl7$logM)/2)
-  
-  # catch[1] = K*Et[1]^alpha * m *(N0*exp(-M*1))^beta
-  meanvec7[1] = exp(pl7$logK)*
-    (dat$Et[1]^exp(pl7$logalpha)) *
-    m *(1e9*exp(pl7$logN0_scaled)) *
-    exp((-exp(pl7$logM)*1))^exp(pl7$logbeta)
-  
-  for(mes in 2:length(dat$Ct)){
-       # core
-    
-    core = exp(pl7$logK)*(dat$Et[mes]^exp(pl7$logalpha)) * m 
-    
-    # M-driven decay
-    
-    part1 = (1e9 * exp(pl7$logN0_scaled)) * exp(-exp(pl7$logM)*mes)
-    
-    # catch aggregation
-    
-    ## Using the observation series 
-    # part2 = 0
-    # for(mes_ant in seq_len(length(dat$Ct)-1)){
-    #   part2 = part2 + Ct[mes_ant]*exp(-M*(mes-mes_ant-1))}
-    
-    ## Using the expected catch recursively
-    part2 = 0
-      # if(mes != 1){
-    for(mes_ant in seq_len(length(meanvec7))){
-    part2 = part2 + meanvec7[mes_ant]*
-      exp(-exp(pl7$logM)*(mes-mes_ant-1))
-    }
-    # }
-    # Recruitment pulses
-    
-    part3 = 0
-    for(j in seq_along(dat$u[dat$u<=mes])){
-      part3 = part3 + pl7$Rt[j]*exp(-exp(pl7$logM)*(mes-dat$u[j]))}
-    
-    
-    # Assemble
-    base = part1 - m * part2 + part3
-    pred = core * (base)^exp(pl7$logbeta)
-    meanvec7[mes] = pred}
-  # for(mes in seq_along(dat$Ct)){
-  #   
-  #   m = exp(-exp(pl7$logM)/2)
-  #   
-  #   # core
-  #   
-  #   core = exp(pl7$logK)*(dat$Et[mes]^exp(pl7$logalpha)) * m 
-  #   
-  #   # M-driven decay
-  #   
-  #   part1 = exp(pl7$logN0)*exp(-exp(pl7$logM)*mes)
-  #   
-  #   # catch aggregation
-  #    
-  #   part2 = 0
-  #   for(mes_ant in seq_len(length(dat$Ct)-1)){
-  #     part2 = part2 + dat$Ct[mes_ant]*exp(-exp(pl7$logM)*(mes-mes_ant-1))}
-  #   
-  #   # Recruitment pulses
-  #   
-  #   part3 = 0
-  #   for(j in seq_along(dat$u[dat$u<=mes])){
-  #     part3 = part3 + 
-  #       summary(sdr7, 'random')[,'Estimate'][j]*
-  #       exp(-exp(pl7$logM)*(mes-dat$u[j]))}
-  #   
-  #   
-  #   # Assemble
-  #   pred = core * (part1 -m*part2 + part3)^exp(pl7$logbeta)
-  #   meanvec7[mes] = pred}
-  
-# Revert transformation of sigma(y)  
-sdy = exp(pl7$logsdCt)
-
-for(i in 1:length(dat$Ct)){
-  log_lik7[i] = dnorm(dat$Ct[i], meanvec7[i], sdy, log=TRUE)
-}
-
-lppd7 = sum(log(mean(exp(log_lik7))))
-p_waic7 = sum(var(log_lik7))
-waic7 = -2 * (lppd7 - p_waic7)
-
-```
-
-```{r}
-#| output: asis
-#| echo: false
-
-xtable(data.frame(Model = c('GMD'),
-                  AIC = c(aic_value7), 
-                  WAIC = c( waic7))) %>% 
+xtable(data.frame(
+                  alpha = c(cat_pars_1$`alpha.MIS+OTB-S`, exp(spg1['logalpha']) %>% unlist),
+                  beta = c(cat_pars_1$`beta.MIS+OTB-S`, exp(spg1['logbeta'])%>% unlist),
+                  k = c(cat_pars_1$`k.MIS+OTB-S`,  exp(spg1['logK'])%>% unlist),
+                  M = c(cat_pars_1$`M.MIS+OTB-S`,  exp(spg1['logM'])%>% unlist),
+                  N0 = c(cat_pars_1$`N0.MIS+OTB-S`,  exp(spg1['logN0_scaled'])%>% unlist),
+                  SD_Ct = c(cat_pars_1$`psi.MIS+OTB-S`, exp(spg1["logsdCt"])%>% unlist),
+                  R1 = c(cat_pars_1$`P1.MIS+OTB-S`,spg1[1]%>% unlist %>% exp),
+                  R2 = c(cat_pars_1$`P2.MIS+OTB-S`,spg1[2]%>% unlist %>% exp),
+                  R3 = c(cat_pars_1$`P3.MIS+OTB-S`,spg1[3]%>% unlist %>% exp),
+                  R4 = c(cat_pars_1$`P4.MIS+OTB-S`,spg1[4]%>% unlist %>% exp),
+                  R5 = c(cat_pars_1$`P5.MIS+OTB-S`,spg1[5]%>% unlist %>% exp),
+                  R6 = c(cat_pars_1$`P6.MIS+OTB-S`,spg1[6]%>% unlist %>% exp),
+                  R7 = c(cat_pars_1$`P7.MIS+OTB-S`,spg1[7]%>% unlist %>% exp),
+                  R8 = c(cat_pars_1$`P8.MIS+OTB-S`,spg1[8]%>% unlist %>% exp),
+                  R9 = c(cat_pars_1$`P9.MIS+OTB-S`,spg1[9]%>% unlist %>% exp),
+                  R10 = c(cat_pars_1$`P10.MIS+OTB-S`,spg1[10]%>% unlist %>% exp),
+                  R11 = c(cat_pars_1$`P11.MIS+OTB-S`,spg1[11]%>% unlist %>% exp),
+                  R12 = c(cat_pars_1$`P12.MIS+OTB-S`,spg1[12]%>% unlist %>% exp),
+                  R13 = c(cat_pars_1$`P13.MIS+OTB-S`,spg1[13]%>% unlist %>% exp),
+                  R14 = c(cat_pars_1$`P14.MIS+OTB-S`,spg1[14]%>% unlist %>% exp),
+                  R15 = c(cat_pars_1$`P15.MIS+OTB-S`,spg1[15]%>% unlist %>% exp),
+                  row.names = c('CatDyn', 'RTMB_spg')) %>% t, digits = 8) %>%
   print(comment = F,
         sanitize.text.function = function(x)
           {gsub("_", "\\\\_", x)})
+
+
 ```
-
-
-
-```{r}
-# plot referencia catdyn
-# 
-results %>% 
-  ggplot() + 
-  geom_line(aes(x =Period.month, 
-                y = Observed.Catch.kg),
-            col = 'black') + 
-    geom_line(aes(x =Period.month, 
-                y = Predicted.Catch.kg),
-            col = 'red', linetype =2) + 
-  geom_line(aes(x =Period.month, 
-                y = dat$Ct),
-            col = 'green', linetype =2) + 
-  theme_bw()
-```
-
 
 ```{r}
 ggplot() + 
-  geom_line(aes(x = annual_biomass$x,
-                y = annual_biomass$B.ton,
-                group = 1),
-            size = 1) +
-  geom_ribbon(aes(x = annual_biomass$x,
-                  y = annual_biomass$B.ton,
-                  ymin= annual_biomass$B.ton- 2*annual_biomass$B.ton.SE,
-                  ymax= annual_biomass$B.ton+ 2*annual_biomass$B.ton.SE),
-              alpha=0.2) +
-
-  # coord_cartesian(ylim = c(0, 300000), xlim = c(1995,2024)) +
-  theme_bw()
-
-results = res_06$pred$Model$Results %>% 
-  as.data.frame() %>% 
-  mutate(x = 1:216)
-
-natural_mortality = res_06$fit$Model$spg$bt.par$M
-natural_mortality_sd = res_06$fit$Model$spg$bt.stdev[['M']]
-
-# Fishing Mortality
-results %>% 
-  ggplot() + 
-  geom_line(aes(x = Period.month,
-                y = `Observed.F.1/month`),
-            col = 'tomato',
-            size = 1) +
-  geom_line(aes(x = Period.month,
-                y = `Predicted.F.1/month`),
-            col = 'darkred',
-            size = 1,
-            linetype = 2) + 
-  geom_hline(yintercept = natural_mortality,
-            col = 'darkgreen',
-            size = 1,
-            linetype = 1) +
-  geom_hline(yintercept = natural_mortality + 2*natural_mortality,
-             col = 'darkgreen',
-             size = 1,
-             linetype = 2) +
-  geom_hline(yintercept = natural_mortality - 2*natural_mortality,
-             col = 'darkgreen',
-             size = 1,
-             linetype = 2) +
-  theme_bw()
-
-# Exploitation Rate
-# Exploitation Rate
-
-results %>% 
-  ggplot() + 
-  geom_line(aes(x = Period.month,
-                y = `Observed.Explotrate`),
-            col = 'tomato',
-            size = 1) +
-
-  geom_line(aes(x = Period.month,
-                y = `Predicted.Explotrate`),
-            col = 'darkred',
-            size = 1,
-            linetype = 2) + 
-  geom_hline(yintercept = 0.4) + 
-  # geom_line(aes(x = Period.month,
-  #               y = `Observed.F.1/month`/(`Observed.F.1/month`+ natural_mortality)),
-  #           col = 'purple',
-  #           size = 1) +
-  # geom_hline(yintercept = 0.4,
-  #            col = 'darkgreen',
-  #            size = 1,
-  #            linetype = 1) +
-  theme_bw()
-
-
-results %>% 
-  summarise(pilas = `Observed.F.1/month`/(`Observed.F.1/month`+natural_mortality),
-            expo = Observed.Explotrate) %>% 
-  mutate(teste = pilas/expo)
+  geom_line(aes(x = 1:180,
+                y = unlist(catdynpred$Model$Results['Predicted.Catch.thou']))) +   
+  geom_line(aes(x = 1:180,
+                y = predicted_catch), col = 'red') + 
+  theme_bw() + 
+  labs(y = 'catch', title = 'Catdyn (black), RTMB (red)')
 ```
 
-```{r}
-#| echo: false
-
-set.seed(1)
-pred7 = rnorm(216,
-              meanvec7,
-              sdy)
-
-ggplot() + 
-  geom_point(aes(x = 1:216,
-                y = dat$Ct)) +
-   geom_line(aes(x = 1:216,
-                y = pred7),
-            color = 'green') + 
-  geom_line(aes(x = 1:216,
-                y = obj7$report()['catch'] %>% unlist()),
-            color = 'red') +
-  theme_bw()
-```
-
-```{r estim_catdyn, eval = F}
-
-cat_df = as.CatDynData(x=df_effort %>%
-                         filter(as.numeric(
-                           as.character(year_sale)) %in% c(2006:2023)),
-                       step="month",
-                       fleet.name="MIS+OTB-S",
-                       coleff=6,
-                       colcat=5,
-                       colmbw=9,
-                       unitseff="trips",
-                       unitscat="kg",
-                       unitsmbw="kg",
-                       nmult="thou",
-                       season.dates=c(as.Date("2006-01-01"),
-                                      last_date_of_week(2023, 52)-1))
-
-# plot.CatDynData(cat_df,
-#                 mark = T,
-#                 offset = c(0,1,10),
-#                 hem = 'N')
-
-indice_manual =
-  list(
-    10,11,12,
-    12,12,10,11,12,
-    11,10,12,7,10,
-    12,11,12,12,10)
-
-for(i in 0:(length(indice_manual)-1)){
-  indice_manual[[i+1]] = 12*i + indice_manual[[i+1]]
-}
-
-# unlist(indice_manual)
-#
-cat_df$Data$`MIS+OTB-S` %>%
-  mutate(year = ((time.step -1) %/% 12),
-         x2 = rep(1:12,length(year)/12)) %>%
-  ggplot() +
-  geom_line(aes(color = factor(year)),
-            linewidth = 1) +
-  aes(y = spikecat,
-      x = x2) +
-  facet_wrap(year ~.) +
-  scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(
-    length(cat_df$Data$`MIS+OTB-S`$time.step)/12)) +
-  theme_bw() +
-  theme(legend.position = 'none')
-#
-#
-#first trial
-a = Sys.time()
-fit_null =
-  trialer(cat_df,
-           p = 18,
-                M = 0.05976,
-                N0.ini = 14020,
-                P = indice_manual,
-                P.ini  = list(
-                5744,40315,3534,
-                21558,2766,9735,
-                55453,3438,16525,
-                10746,14552,2524,
-                22789,12567,34463,
-                20000,20000,20000),
-                k.ini = 0.00003546,
-                alpha.ini = 1.1455,
-                beta.ini  = 0.6134,
-                distr = i,
-                method = j,
-                itnmax = 10000,
-                disp = list(100))
-b = Sys.time()
-b-a
-#
-# # all fits
-a = Sys.time()
-distribuicoes = c("gamma", "lognormal","normal","negbin","aplnormal", "apnormal")
-optimizadores = c('CG', 'spg', 'BFGS', 'Nelder-Mead')
-gdm_log_06 = data_frame(distr = character(),
-                        methods = character())
-modelos_gdm_06 = list()
-for(i in distribuicoes){
-  for(j in optimizadores){
-    tryCatch({
-      modelos_gdm_06[[length(modelos_gdm_06)+1]] =
-        trialer(cat_df,
-                p = 18,
-                M = 0.05976,
-                N0.ini = 14020,
-                P = indice_manual,
-                P.ini  = list(
-                5744,40315,3534,
-                21558,2766,9735,
-                55453,3438,16525,
-                10746,14552,2524,
-                22789,12567,34463,
-                20000,20000,20000),
-                k.ini = 0.00003546,
-                alpha.ini = 1.1455,
-                beta.ini  = 0.6134,
-                distr = i,
-                method = j,
-                itnmax = 10000,
-                disp = list(100))
-
-      gdm_log_06[nrow(gdm_log_06)+1,1] = i
-      gdm_log_06[nrow(gdm_log_06),2] = j
-    },
-    error=function(e){print(paste(i,j))
-    })
-  }
-}
-b = Sys.time()
-b-a
-
-resultados_06 = lapply(modelos_gdm_06, function(x){x$fit})
 
 
-pred_06 = lapply(modelos_gdm_06, function(x){x$pred})
-CatDynSum(x=resultados_06,
-          season=2006,
-          method=gdm_log_06$methods) %>% View
 
 
-# plotador(cat_df, fit_null, pre = F,
-#          post1 = T,
-#          post2 = T)
-save(fit_null,
-     resultados_06,
-     pred_06,
-     gdm_log_06,
-     file = 'data/preliminar_catdyn_fits.Rdata')
+\todo[inline]{NaN warnings were also produced here}
 
-load('data/preliminar_catdyn_fits.Rdata')
-# plotador(cat_df, fit_null, pre = F,
-#          post1 = T,
-#          post2 = T)
-
-
-# exclude failures
-tabela = 
-CatDynSum(x=resultados_06,
-          season=2006,
-          method=gdm_log_06$methods) %>% 
-  mutate(across(everything(),
-                function(x){
-    as.vector(unlist(x))}))
-
-modelos_completos = 
-tabela %>% 
-  mutate(indice = 1:nrow(tabela)) %>% 
-  filter(!if_any(everything(), is.nan)) %>% select(indice)
-
-# 12
-tabela[12,]
-
-res_06 = list()
-res_06$pred = pred_06[[modelos_completos$indice]]
-res_06$fit = resultados_06[[modelos_completos$indice]]
-
-annual_biomass =
-  CatDynBSD(res_06$fit,
-            method = names(res_06$fit$Model),
-            multi = T,
-            mbw.sd = predicos$se.fit) %>% 
-  mutate(TimeStep = 216,
-         x =seq(2006,2023+11/12,1/12)) 
-
-catch_cat = unlist(CatDynPred(x=res_06$fit,method="spg")$Model$Results['Predicted.Catch.thou'])
-
-```
 
 \begin{abstract}
 
@@ -752,13 +603,14 @@ This is sample text and needs to be completely replaced before submitting your p
 
 \section{Methodology}
 
-\subsection{CatDyn}
+This work aims to reproduce the work first presented in [trabalho do isco].
 
-The fishery was assessed with *MAGD* in a previous work. In the current work, the same premises were adopted.
+Data was provided bt DGRM. It spans the years of 2005 to 2020. Like the reference work, landings and effort from the polyvalent and bottom trawl fleets were included since no significant differences between their catch and effort relationship were observed. In this fashion, captures from near shore and coast fisheries were accounted for.
 
-* Purse seine landings were discarded, for being too small
-* Landings and effort from the polyvalent and bottom trawl fleets were included since no significant differences between their catch and effort relationship were observed. In this fashion, captures from near shore and coast fisheries were accounted for.
-* Models were checked for gradient in parameter larger than 1
+Due to the defesation, september of 2016 had catch 0, which caused a failure in the numerical methods of the optimization process. An arbitrary 0.01 kg were added to the catch of octopus in this month.
+
+
+
 
 
 \section{References}
