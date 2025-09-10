@@ -447,9 +447,10 @@ upper <- list(
 )
 
 # Run optimizer
-# fit = nlminb(obj$par, obj$fn, obj$gr,
-#   lower = unlist(lower),
-#   upper = unlist(upper))
+fit_nlmimb = nlminb(obj$par, obj$fn, obj$gr)
+fit_nlmimb_nogr = nlminb(obj$par, obj$fn, NULL)
+# lower = unlist(lower),
+# upper = unlist(upper))
 
 spg1 = optimx(par = obj$par,
              fn = obj$fn,
@@ -539,28 +540,49 @@ cat_pars_1 = fit_null$fit$Model$spg$bt.par
 #| cap-location: top
 
 xtable(data.frame(
-                  alpha = c(cat_pars_1$`alpha.MIS+OTB-S`, exp(spg1['logalpha']) %>% unlist),
-                  beta = c(cat_pars_1$`beta.MIS+OTB-S`, exp(spg1['logbeta'])%>% unlist),
-                  k = c(cat_pars_1$`k.MIS+OTB-S`,  exp(spg1['logK'])%>% unlist),
-                  M = c(cat_pars_1$`M.MIS+OTB-S`,  exp(spg1['logM'])%>% unlist),
-                  N0 = c(cat_pars_1$`N0.MIS+OTB-S`,  exp(spg1['logN0_scaled'])%>% unlist),
-                  SD_Ct = c(cat_pars_1$`psi.MIS+OTB-S`, exp(spg1["logsdCt"])%>% unlist),
-                  R1 = c(cat_pars_1$`P1.MIS+OTB-S`,spg1[1]%>% unlist %>% exp),
-                  R2 = c(cat_pars_1$`P2.MIS+OTB-S`,spg1[2]%>% unlist %>% exp),
-                  R3 = c(cat_pars_1$`P3.MIS+OTB-S`,spg1[3]%>% unlist %>% exp),
-                  R4 = c(cat_pars_1$`P4.MIS+OTB-S`,spg1[4]%>% unlist %>% exp),
-                  R5 = c(cat_pars_1$`P5.MIS+OTB-S`,spg1[5]%>% unlist %>% exp),
-                  R6 = c(cat_pars_1$`P6.MIS+OTB-S`,spg1[6]%>% unlist %>% exp),
-                  R7 = c(cat_pars_1$`P7.MIS+OTB-S`,spg1[7]%>% unlist %>% exp),
-                  R8 = c(cat_pars_1$`P8.MIS+OTB-S`,spg1[8]%>% unlist %>% exp),
-                  R9 = c(cat_pars_1$`P9.MIS+OTB-S`,spg1[9]%>% unlist %>% exp),
-                  R10 = c(cat_pars_1$`P10.MIS+OTB-S`,spg1[10]%>% unlist %>% exp),
-                  R11 = c(cat_pars_1$`P11.MIS+OTB-S`,spg1[11]%>% unlist %>% exp),
-                  R12 = c(cat_pars_1$`P12.MIS+OTB-S`,spg1[12]%>% unlist %>% exp),
-                  R13 = c(cat_pars_1$`P13.MIS+OTB-S`,spg1[13]%>% unlist %>% exp),
-                  R14 = c(cat_pars_1$`P14.MIS+OTB-S`,spg1[14]%>% unlist %>% exp),
-                  R15 = c(cat_pars_1$`P15.MIS+OTB-S`,spg1[15]%>% unlist %>% exp),
-                  row.names = c('CatDyn', 'RTMB_spg')) %>% t, digits = 8) %>%
+                  alpha = c(cat_pars_1$`alpha.MIS+OTB-S`, exp(spg1['logalpha']) %>% unlist,
+                            exp(fit_nlmimb$par['logalpha']),  exp(fit_nlmimb_nogr$par['logalpha'])),
+                  beta = c(cat_pars_1$`beta.MIS+OTB-S`, exp(spg1['logbeta'])%>% unlist,
+                           exp(fit_nlmimb$par['logbeta']),  exp(fit_nlmimb_nogr$par['logbeta'])),
+                  k = c(cat_pars_1$`k.MIS+OTB-S`,  exp(spg1['logK'])%>% unlist,
+                        exp(fit_nlmimb$par['logK']),  exp(fit_nlmimb_nogr$par['logK'])),
+                  M = c(cat_pars_1$`M`,  exp(spg1['logM'])%>% unlist,
+                        exp(fit_nlmimb$par['logM']),  exp(fit_nlmimb_nogr$par['logM'])),
+                  N0 = c(cat_pars_1$N0,  exp(spg1['logN0_scaled'])%>% unlist,
+                         exp(fit_nlmimb$par['logN0_scaled']),  exp(fit_nlmimb_nogr$par['logN0_scaled'])),
+                  SD_Ct = c("NA", exp(spg1["logsdCt"])%>% unlist,
+                            exp(fit_nlmimb$par['logsdCt']),  exp(fit_nlmimb_nogr$par['logsdCt'])),
+                  R1 = c(cat_pars_1$`P1.MIS+OTB-S`,spg1[1]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[1]),  exp(fit_nlmimb_nogr$par[1])),
+                  R2 = c(cat_pars_1$`P2.MIS+OTB-S`,spg1[2]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[2]),  exp(fit_nlmimb_nogr$par[2])),
+                  R3 = c(cat_pars_1$`P3.MIS+OTB-S`,spg1[3]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[3]),  exp(fit_nlmimb_nogr$par[3])),
+                  R4 = c(cat_pars_1$`P4.MIS+OTB-S`,spg1[4]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[4]),  exp(fit_nlmimb_nogr$par[4])),
+                  R5 = c(cat_pars_1$`P5.MIS+OTB-S`,spg1[5]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[5]),  exp(fit_nlmimb_nogr$par[5])),
+                  R6 = c(cat_pars_1$`P6.MIS+OTB-S`,spg1[6]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[6]),  exp(fit_nlmimb_nogr$par[6])),
+                  R7 = c(cat_pars_1$`P7.MIS+OTB-S`,spg1[7]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[7]),  exp(fit_nlmimb_nogr$par[7])),
+                  R8 = c(cat_pars_1$`P8.MIS+OTB-S`,spg1[8]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[8]),  exp(fit_nlmimb_nogr$par[8])),
+                  R9 = c(cat_pars_1$`P9.MIS+OTB-S`,spg1[9]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[9]),  exp(fit_nlmimb_nogr$par[9])),
+                  R10 = c(cat_pars_1$`P10.MIS+OTB-S`,spg1[10]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[10]),  exp(fit_nlmimb_nogr$par[10])),
+                  R11 = c(cat_pars_1$`P11.MIS+OTB-S`,spg1[11]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[11]),  exp(fit_nlmimb_nogr$par[11])),
+                  R12 = c(cat_pars_1$`P12.MIS+OTB-S`,spg1[12]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[12]),  exp(fit_nlmimb_nogr$par[12])),
+                  R13 = c(cat_pars_1$`P13.MIS+OTB-S`,spg1[13]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[13]),  exp(fit_nlmimb_nogr$par[13])),
+                  R14 = c(cat_pars_1$`P14.MIS+OTB-S`,spg1[14]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[14]),  exp(fit_nlmimb_nogr$par[14])),
+                  R15 = c(cat_pars_1$`P15.MIS+OTB-S`,spg1[15]%>% unlist %>% exp,
+                         exp(fit_nlmimb$par[15]),  exp(fit_nlmimb_nogr$par[15])),
+                  row.names = c('CatDyn', 'RTMB_spg','RTMB_nlmimb', 'RTMB_nlmimb_nogradient')) %>% t, digits = 8) %>%
   print(comment = F,
         sanitize.text.function = function(x)
           {gsub("_", "\\\\_", x)})
