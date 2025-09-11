@@ -175,6 +175,8 @@ report_manual = function(p, method, dates,
 ```
 
 ```{r}
+#| echo: false
+#| results: hide
 par = list(
   logRt_scaled = log(c(5700,40000,3500,
                        21000,2700,9700,
@@ -210,6 +212,12 @@ catdynexp(cat_df, 15, c(par$logM, par$logN0_scaled, par$logRt_scaled, par$logK, 
 
 exp_cat$Model$Results$Predicted.Catch.thou
 
+
+```
+
+
+```{r}
+#| echo: false
 ggplot() + 
   geom_line(aes(x = 1:180,
                 y = exp_cat$Model$Results$Predicted.Catch.thou), col = 'red') + 
@@ -217,9 +225,13 @@ ggplot() +
                 y = exp_cat$Model$Results$Observed.Catch.thou)) + theme_bw()
 ```
 
+
+
 # CatDyn
 
 ```{r}
+#| echo: false
+
 distribuicoes = c("gamma", "lognormal","normal","negbin","aplnormal", "apnormal")
 optimizadores = c('CG', 'spg', 'BFGS', 'Nelder-Mead')
 
@@ -249,9 +261,25 @@ annual_biomass =
 
 catch_cat = unlist(CatDynPred(x=fit_null$fit,method="spg")$Model$Results['Predicted.Catch.thou'])
 cat_pars_1 = fit_null$fit$Model$spg$bt.par
+
+
+results = fit_null$pred$Model$Results %>% 
+  as.data.frame() %>% 
+  mutate(x = 1:180)
+
+natural_mortality = fit_null$fit$Model$spg$bt.par$M
+natural_mortality_sd = fit_null$fit$Model$spg$bt.stdev[['M']]
+
+f_m = results$`Observed.F.1/month`/(results$`Observed.F.1/month` + natural_mortality)
+
+f_m_p = results$`Predicted.F.1/month`/(results$`Predicted.F.1/month` + natural_mortality)
 ```
 
 ```{r}
+#| echo: false
+
+# CatDyn biomass plot
+
 ggplot() + 
   geom_line(aes(x = annual_biomass$x,
                 y = annual_biomass$B.ton,
@@ -263,16 +291,12 @@ ggplot() +
                   ymax= annual_biomass$B.ton+ 2*annual_biomass$B.ton.SE*0),
               alpha=0.4) +
  theme_bw()
-  
-  # coord_cartesian(ylim = c(0, 300000), xlim = c(1995,2024)) +
-  theme_bw()
+```
 
-results = fit_null$pred$Model$Results %>% 
-  as.data.frame() %>% 
-  mutate(x = 1:180)
+```{r}
+#| echo: false
 
-natural_mortality = fit_null$fit$Model$spg$bt.par$M
-natural_mortality_sd = fit_null$fit$Model$spg$bt.stdev[['M']]
+# CatDyn mortality plot
 
 results %>% 
   ggplot() + 
@@ -289,19 +313,25 @@ results %>%
              col = 'darkgreen',
              size = 1,
              linetype = 1) +
-  # geom_hline(yintercept = natural_mortality + 2*natural_mortality,
-  #            col = 'darkgreen',
-  #            size = 1,
-  #            linetype = 2) +
-  # geom_hline(yintercept = natural_mortality - 2*natural_mortality,
-  #            col = 'darkgreen',
-  #            size = 1,
-  #            linetype = 2) +
+  geom_hline(yintercept = natural_mortality + 2*natural_mortality_sd,
+             col = 'darkgreen',
+             size = 1,
+             linetype = 2) +
+  geom_hline(yintercept = natural_mortality - 2*natural_mortality_sd,
+             col = 'darkgreen',
+             size = 1,
+             linetype = 2) +
   theme_bw()
+```
 
-f_m = results$`Observed.F.1/month`/(results$`Observed.F.1/month` + natural_mortality)
 
-f_m_p = results$`Predicted.F.1/month`/(results$`Predicted.F.1/month` + natural_mortality)
+```{r}
+#| echo: false
+
+# CatDyn exploitation plot
+  
+  # coord_cartesian(ylim = c(0, 300000), xlim = c(1995,2024)) +
+  # theme_bw()
 
 results %>% 
   ggplot() + 
@@ -353,6 +383,7 @@ Both allow non-linearity for $E_t$ and $N_t$;
 ```{r}
 #| results: hide
 #| warning: false
+#| echo: false
 
 nmult = 1e3
 dat = list()
@@ -469,6 +500,14 @@ sdr = sdreport(obj)
 pl = as.list(sdr,"Est")
 plsd = as.list(sdr,"Std")
 
+
+```
+
+```{r}
+#| echo: false
+
+# results from RTMB catch prediction 
+
 ggplot() + 
   geom_line(aes(x = 1:length(dat$Ct),
                 y = catch_cat)) + 
@@ -480,6 +519,9 @@ ggplot() +
 
 
 ```{r}
+#| echo: false
+#| results: hide
+
 # report from catdyn
 fit_null$fit$Model$spg
 
@@ -496,41 +538,6 @@ predicted_catch = obj$report()$predcat #RTMB
 
 
 cat_pars_1 = fit_null$fit$Model$spg$bt.par
-
-
-
-
-
-# xtable(data.frame(
-#                   alpha = c(cat_pars_1$`alpha.MIS+OTB-S`, exp(fit$par['logalpha']), exp(CG1['logalpha']) %>% unlist),
-#                   beta = c(cat_pars_1$`beta.MIS+OTB-S`, exp(fit$par['logbeta']), exp(CG1['logbeta'])%>% unlist),
-#                   k = c(cat_pars_1$`k.MIS+OTB-S`, exp(fit$par['logK']), exp(CG1['logK'])%>% unlist),
-#                   M = c(cat_pars_1$`M.MIS+OTB-S`, exp(fit$par['logM']), exp(CG1['logM'])%>% unlist),
-#                   N0 = c(cat_pars_1$`N0.MIS+OTB-S`, exp(fit$par['logN0_scaled']), exp(CG1['logN0_scaled'])%>% unlist),
-#                   SD_Ct = c(cat_pars_1$`psi.MIS+OTB-S`, exp(fit$par["logsdCt"]), exp(CG1["logsdCt"])%>% unlist),
-#                   R1 = c(cat_pars_1$`P1.MIS+OTB-S`,fit$par[3],CG1[3]%>% unlist %>% exp),
-#                   R2 = c(cat_pars_1$`P2.MIS+OTB-S`,fit$par[4],CG1[4]%>% unlist %>% exp),
-#                   R3 = c(cat_pars_1$`P3.MIS+OTB-S`,fit$par[5],CG1[5]%>% unlist %>% exp),
-#                   R4 = c(cat_pars_1$`P4.MIS+OTB-S`,fit$par[6],CG1[6]%>% unlist %>% exp),
-#                   R5 = c(cat_pars_1$`P5.MIS+OTB-S`,fit$par[7],CG1[7]%>% unlist %>% exp),
-#                   R6 = c(cat_pars_1$`P6.MIS+OTB-S`,fit$par[8],CG1[8]%>% unlist %>% exp),
-#                   R7 = c(cat_pars_1$`P7.MIS+OTB-S`,fit$par[9],CG1[9]%>% unlist %>% exp),
-#                   R8 = c(cat_pars_1$`P8.MIS+OTB-S`,fit$par[10],CG1[10]%>% unlist %>% exp),
-#                   R9 = c(cat_pars_1$`P9.MIS+OTB-S`,fit$par[11],CG1[11]%>% unlist %>% exp),
-#                   R10 = c(cat_pars_1$`P10.MIS+OTB-S`,fit$par[12],CG1[12]%>% unlist %>% exp),
-#                   R11 = c(cat_pars_1$`P11.MIS+OTB-S`,fit$par[13],CG1[13]%>% unlist %>% exp),
-#                   R12 = c(cat_pars_1$`P12.MIS+OTB-S`,fit$par[14],CG1[14]%>% unlist %>% exp),
-#                   R13 = c(cat_pars_1$`P13.MIS+OTB-S`,fit$par[15],CG1[15]%>% unlist %>% exp),
-#                   R14 = c(cat_pars_1$`P14.MIS+OTB-S`,fit$par[16],CG1[16]%>% unlist %>% exp),
-#                   R15 = c(cat_pars_1$`P15.MIS+OTB-S`,fit$par[17],CG1[17]%>% unlist %>% exp),
-#                   R16 = c(cat_pars_1$`P16.MIS+OTB-S`,fit$par[18],CG1[18]%>% unlist %>% exp),
-#                   R17 = c(cat_pars_1$`P17.MIS+OTB-S`,fit$par[19],CG1[19]%>% unlist %>% exp),
-#                   R18 = c(cat_pars_1$`P18.MIS+OTB-S`,fit$par[20],CG1[20]%>% unlist %>% exp),
-#                   row.names = c('CatDyn','RTMB', 'RTMB_CG')) %>% t, digits = 8) %>%
-#   print(comment = F,
-#         sanitize.text.function = function(x)
-#           {gsub("_", "\\\\_", x)})
-
 ```
 
 
@@ -591,6 +598,7 @@ xtable(data.frame(
 ```
 
 ```{r}
+#| echo: false
 ggplot() + 
   geom_line(aes(x = 1:180,
                 y = unlist(catdynpred$Model$Results['Predicted.Catch.thou']))) +   
@@ -602,8 +610,297 @@ ggplot() +
 
 
 
+## RTMB With $K(t)$
+
+```{r}
+#| results: hide
+#| warning: false
+#| echo: false
+
+nmult = 1e3
+dat = list()
+dat$Ct = as.vector(cat_df$Data$`MIS+OTB-S`$obscat.thou)         # observed catch
+dat$Et = as.vector(cat_df$Data$`MIS+OTB-S`$obseff.trips)       # effort
+dat$u = unlist(indice_manual)                   # recruitment pulse months
+nT = length(dat$Ct)
+nR = length(dat$u)
+nS = ceiling(nT/12) # of seasons
+
+season = matrix(0, nrow = nT, ncol = nS)
+for (j in 1:nS) {
+  season[(j-1) * 12  + (1:12), j] <- 1 # .
+}  
+
+I = matrix(0, nrow = nT, ncol = nR)
+for (j in 1:nR) {
+  I[(dat$u[j]-1):nT, j] <- 1 # -1 foi adicionado para ficar consistente com CatDyn.
+}
+
+dat$I = I
+dat$season = season
+
+# Initial parameter values
+par_kt = par # already defined on catdyn chunk
+par_kt$logkt = rep(par$logK, ceiling(nT/12))
+
+# initialize joint negative loglikelihood function
+
+jnll_kt = function(par_kt) {
+  getAll(par_kt, dat)
 
 
+  # Extract parameters
+  Ct     = OBS(Ct)
+  Et     = OBS(Et)
+  I  = OBS(I)
+  alpha  = exp(logalpha)
+  beta   = exp(logbeta)
+  Kt     = exp(logkt)
+  N0     = exp(logN0_scaled)
+  M      = exp(logM)
+  sdCt   = exp(logsdCt)
+  Rt     = exp(logRt_scaled)
+
+  jnll = 0
+  # Initialize predicted catch and biomass
+
+
+  #comprimento = length(Ct)
+nstep <- vector("numeric", nT) * alpha#init vector
+mccum = vector("numeric", nT) * alpha
+effeff1 = vector("numeric", nT) * alpha
+effn1 = vector("numeric", nT) * alpha
+predcat = vector("numeric", nT) * alpha
+
+
+  mccum[1] = 0
+  nstep[1] <- N0 * exp(-M)
+  for(i in 2:nT){
+  
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
+    nstep[i] = N0 * exp(-M*i) + 
+      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) 
+      mccum[i] * exp(-M/2)
+    
+    effeff1 <- Et^(alpha)
+    effn1 <- nstep^(beta)
+    predcat <- season[i, ceiling(i/12)] * Kt * (effeff1 * effn1) * exp(-M/2)
+    # season_i <- ceiling(i / 12)
+    # season_i <- min(season_i, length(Kt))  # safety check
+
+    # effeff1 <- Et[i]^alpha
+    # effn1   <- nstep[i]^beta
+    # 
+    # predcat[i] <- Kt[season_i] * effeff1 * effn1 * exp(-M/2)
+    }
+  
+  # Negative log-likelihood
+  jnll = -sum(dnorm(log(Ct), mean = log(predcat), sd = logsdCt, log = TRUE))
+  # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
+    REPORT(predcat)
+    REPORT(Kt)
+    REPORT(nstep)
+  jnll
+
+}
+
+# quick test: do we get a number? This number should be a likelihood.
+jnll_kt(par_kt)
+
+obj_kt = MakeADFun(jnll_kt, par_kt)
+
+# Set bounds
+
+Rt_min = 0      # recruitment can't be negative
+Rt_max = 1e8
+
+lower <- list(
+  logRt_scaled = rep(Rt_min, 9),
+  logalpha = -10, logbeta = -10, logK = -10,
+  logN0_scaled = -10, logM = -10, logsdCt = -10
+)
+
+upper <- list(
+  logRt_scaled = rep(Rt_max, 9),
+  logalpha = 10, logbeta = 10, logK = 10,
+  logN0_scaled = 10, logM = 10, logsdCt = 10
+)
+
+# Run optimizer
+fit_nlmimb_kt = nlminb(obj_kt$par, obj_kt$fn, obj_kt$gr)
+
+# lower = unlist(lower),
+# upper = unlist(upper))
+
+spg1_kt = optimx(par = obj_kt$par,
+             fn = obj_kt$fn,
+             gr = NULL,
+             method = 'spg',
+             output = 'estimate',
+             hessian = T,
+             itnmax = 50000)
+
+
+
+obj_kt$report()$Kt
+obj_kt$report()$nstep
+obj_kt$report()$predcat
+
+# Retrieve predicted catch
+predicted_catch_kt = obj_kt$report()$predcat
+sdr_kt = sdreport(obj_kt)
+pl_kt = as.list(sdr_kt,"Est")
+plsd_kt = as.list(sdr_kt,"Std")
+
+
+```
+
+
+```{r}
+#| echo: false
+
+# results from RTMB catch prediction 
+
+ggplot() + 
+  geom_line(aes(x = 1:length(dat$Ct),
+                y = catch_cat)) + 
+   geom_line(aes(x = 1:length(dat$Ct),
+                y = predicted_catch_kt), col = 'red') +
+     geom_line(aes(x = 1:length(dat$Ct),
+                y = dat$Ct), linetype = 'dashed')
+```
+
+## RTMB With $alpha(t)$
+
+```{r}
+#| results: hide
+#| warning: false
+#| echo: false
+
+nmult = 1e3
+dat = list()
+dat$Ct = as.vector(cat_df$Data$`MIS+OTB-S`$obscat.thou)         # observed catch
+dat$Et = as.vector(cat_df$Data$`MIS+OTB-S`$obseff.trips)       # effort
+dat$u = unlist(indice_manual)                   # recruitment pulse months
+nT = length(dat$Ct)
+nR = length(dat$u)
+
+
+I = matrix(0, nrow = nT, ncol = nR)
+for (j in 1:nR) {
+  I[(dat$u[j]-1):nT, j] <- 1 # -1 foi adicionado para ficar consistente com CatDyn.
+}
+
+dat$I = I
+
+# Initial parameter values
+par_at = par # already defined on catdyn chunk
+par_at$logalpha = rep(par$logalpha, ceiling(nT/12))
+
+# initialize joint negative loglikelihood function
+
+jnll_at = function(par_at) {
+  getAll(par_at, dat)
+
+  # Extract parameters
+  Ct     = OBS(Ct)
+  Et     = OBS(Et)
+  I  = OBS(I)
+  alpha  = exp(logalpha)
+  beta   = exp(logbeta)
+  K     = exp(logK)
+  N0     = exp(logN0_scaled)
+  M      = exp(logM)
+  sdCt   = exp(logsdCt)
+  Rt     = exp(logRt_scaled)
+
+  jnll = 0
+  # Initialize predicted catch and biomass
+
+
+  #comprimento = length(Ct)
+nstep <- vector("numeric", nT) * alpha#init vector
+mccum = vector("numeric", nT) * alpha
+effeff1 = vector("numeric", nT) * alpha
+effn1 = vector("numeric", nT) * alpha
+predcat = vector("numeric", nT) * alpha
+
+
+  mccum[1] = 0
+  nstep[1] <- N0 * exp(-M)
+  for(i in 2:nT){
+    season = ceiling(i/12)
+    mccum[i] = Ct[i-1] + mccum[i-1] * exp(-M)
+    nstep[i] = N0 * exp(-M*i) + 
+      sum(I[i,] * Rt * exp(-M*(i-(dat$u-1)+1))) -
+      mccum[i] * exp(-M/2)
+    effeff1 <- Et^(alpha[season])
+    effn1 <- nstep^(beta)
+    predcat <- K * (effeff1 * effn1) * exp(-M/2)
+  }
+  
+  # Negative log-likelihood
+  jnll = -sum(dnorm(log(Ct), mean = log(predcat), sd = logsdCt, log = TRUE))
+  # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
+    REPORT(predcat)
+    REPORT(alpha)
+    REPORT(nstep)
+  jnll
+
+}
+
+
+
+# quick test: do we get a number? This number should be a likelihood.
+jnll_at(par_at)
+
+obj_at = MakeADFun(jnll_at, par_at)
+
+# Set bounds
+
+Rt_min = 0      # recruitment can't be negative
+Rt_max = 1e8
+
+# lower <- list(
+#   logRt_scaled = rep(Rt_min, 9),
+#   logalpha = -10, logbeta = -10, logK = -10,
+#   logN0_scaled = -10, logM = -10, logsdCt = -10
+# )
+# 
+# upper <- list(
+#   logRt_scaled = rep(Rt_max, 9),
+#   logalpha = 10, logbeta = 10, logK = 10,
+#   logN0_scaled = 10, logM = 10, logsdCt = 10
+# )
+
+# Run optimizer
+fit_nlmimb_at = nlminb(obj_at$par, obj_at$fn, obj_at$gr)
+
+# lower = unlist(lower),
+# upper = unlist(upper))
+
+spg1_at = optimx(par = obj_at$par,
+             fn = obj_at$fn,
+             gr = NULL,
+             method = 'spg',
+             output = 'estimate',
+             hessian = T,
+             itnmax = 50000)
+
+
+
+obj_at$report()$alpha
+obj_at$report()$nstep
+obj_at$report()$predcat
+
+# Retrieve predicted catch
+predicted_catch_at = obj_at$report()$predcat
+sdr_at = sdreport(obj_at)
+pl_at = as.list(sdr_at,"Est")
+plsd_at = as.list(sdr_at,"Std")
+
+
+```
 \todo[inline]{NaN warnings were also produced here}
 
 
@@ -681,7 +978,7 @@ QQ&     3&      $\mu$&  0&      0\\
 This is sample text and needs to be completely replaced before submitting your paper. 
 
 \begin{figure}[t]
-\centering\includegraphics[scale=.75]{fig1.eps}
+\centering\includegraphics[scale=.75]{fig1.JPG}
 \caption{Place figure caption here.}
 \end{figure}
 
