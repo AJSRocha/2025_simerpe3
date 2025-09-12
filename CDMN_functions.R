@@ -165,3 +165,96 @@ function (par, dates, obscat1, obseff1, obsmbm1, obscat2, obseff2,
     return(negsup)
   }
 }
+
+
+#.CatDynLik1F
+function (obscat1, predcat1, distr, par) 
+{
+  Likel <- vector("list", 4)
+  names(Likel) <- c("Dispersion", "Deviance", "Likelihood", 
+                    "DevianceResidual")
+  sealen <- length(obscat1)
+  if (distr == "poisson") {
+    psi1 <- 1
+    dev1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, 2 * (obscat1 * 
+                                                           log(obscat1) - obscat1 * log(predcat1) - (obscat1 - 
+                                                                                                       predcat1)))
+    likcontr1 <- ifelse(predcat1 == 0, 0, obscat1 * log(predcat1) - 
+                          predcat1 - lfactorial(obscat1))
+    res1 <- sign(obscat1 - predcat1) * sqrt(dev1)
+  }
+  else if (distr == "negbin") {
+    psi1 <- exp(tail(par, 1))
+    dev1 <- ifelse(obscat1 == 0, 2 * log(1 + predcat1), 2 * 
+                     (obscat1 * log(obscat1/predcat1) - (obscat1 + 1) * 
+                        log((1 + obscat1)/(1 + predcat1))))
+    likcontr1 <- ifelse(predcat1 == 0, 0, obscat1 * log(1/psi1) + 
+                          obscat1 * log(predcat1) - (obscat1 + psi1) * log(1 + 
+                                                                             predcat1/psi1) + lgamma(obscat1 + psi1) - lgamma(obscat1 + 
+                                                                                                                                1) - lgamma(psi1))
+    res1 <- sign(obscat1 - predcat1) * sqrt(dev1)
+  }
+  else if (distr == "normal") {
+    psi1 <- exp(tail(par, 1))
+    dev1 <- (obscat1 - predcat1)^2
+    likcontr1 <- -(1/2) * log(2 * pi * psi1) - (1/(2 * psi1)) * 
+      (obscat1 - predcat1)^2
+    res1 <- sign(obscat1 - predcat1) * sqrt(dev1)
+  }
+  else if (distr == "apnormal") {
+    psi1 <- NA
+    dev1 <- NA
+    likcontr1 <- (obscat1 - predcat1)^2
+    res1 <- obscat1 - predcat1
+  }
+  else if (distr == "lognormal") {
+    psi1 <- exp(tail(par, 1))
+    dev1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, (log(obscat1) - 
+                                                       log(predcat1))^2)
+    likcontr1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, 
+                        -(1/2) * log(2 * obscat1^2 * pi * psi1) - (1/(2 * 
+                                                                        psi1)) * (log(obscat1) - log(predcat1))^2)
+    res1 <- sign(obscat1 - predcat1) * sqrt(dev1)
+  }
+  else if (distr == "aplnormal") {
+    psi1 <- NA
+    dev1 <- NA
+    likcontr1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, 
+                        (log(obscat1) - log(predcat1))^2)
+    res1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, log(obscat1) - 
+                     log(predcat1))
+  }
+  else if (distr == "gamma") {
+    psi1 <- exp(tail(par, 1))
+    dev1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, -(2/psi1) * 
+                     (log(obscat1/predcat1) - (obscat1 - predcat1)/predcat1))
+    likcontr1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, 
+                        (1/psi1) * (log(obscat1) - log(psi1 * predcat1)) - 
+                          log(obscat1) - sealen * lgamma(1/psi1) - obscat1/(psi1 * 
+                                                                              predcat1))
+    res1 <- sign(obscat1 - predcat1) * sqrt(dev1)
+  }
+  else if (distr == "roblognormal") {
+    psi1 <- exp(tail(par, 1))
+    dev1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, (log(obscat1) - 
+                                                       log(predcat1))^2)
+    likcontr1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, 
+                        -log(psi1) + log(exp(-0.5 * (log(obscat1/predcat1)/psi1 + 
+                                                       0.5 * psi1)^2) + 0.01))
+    res1 <- sign(obscat1 - predcat1) * sqrt(dev1)
+  }
+  else if (distr == "gumbel") {
+    psi1 <- exp(tail(par, 1))
+    dev1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, 2 * (-1 + 
+                                                           (obscat1 - predcat1)/psi1 + exp(-(obscat1 - predcat1)/psi1)))
+    likcontr1 <- ifelse(obscat1 == 0 | predcat1 == 0, 0, 
+                        -log(psi1) - (obscat1 - predcat1)/psi1 - exp(-(obscat1 - 
+                                                                         predcat1)/psi1))
+    res1 <- sign(obscat1 - predcat1) * sqrt(dev1)
+  }
+  Likel[["Dispersion"]] <- psi1
+  Likel[["Deviance"]] <- dev1
+  Likel[["Likelihood"]] <- likcontr1
+  Likel[["DevianceResidual"]] <- res1
+  return(Likel)
+}

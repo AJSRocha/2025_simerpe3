@@ -105,90 +105,102 @@ report_manual = function(p, method, dates,
                          distr, fleet.name, par.tmp,
                          opt_result){
   results2 = vector("list", length(method))
-      names(results2) = method
-      temp = attr(opt_result, "details")
-      for (i in 1:length(method)) {
-        results2[[i]]$Type <- p
-        results2[[i]]$Dates <- dates
-        names(results2[[i]]$Dates) <- c("ts.start",
-                                        paste0('ts.', seq(1:p)),
-                                        "ts.end")
-        results2[[i]]$Distr <- distr
-        par.names <- c("M", "N0", paste0('P', seq(1:p), ".", rep(fleet.name,p)),
-                       paste(c("k.", "alpha.", "beta."), fleet.name, sep = ""))
-        
-        if (distr %in% c("negbin", "normal" ,
-                         "lognormal",  "gamma",
-                         "roblognormal", "gumbel")) {
-          par.names <- c(par.names, paste("psi.", fleet.name, 
-            sep = ""))
-        }
-        
-        results2[[i]]$converg <- "FAIL"
-        results2[[i]]$kkt <- NA
-        results2[[i]]$AIC <- NA
-        results2[[i]]$bt.par <- NA
-        results2[[i]]$num.grads <- NA
-        results2[[i]]$bt.stdev <- NA
-        results2[[i]]$Cor <- matrix(NA, length(par.names), 
-          length(par.names))
-        
-        if (length(temp[i, ]$ngatend) == length(par.names) & 
-          !any(is.na(temp[i, ]$nhatend)) & 1/kappa(temp[i, 
-          ]$nhatend) > 1e-15) {
-          results2[[i]]$converg <- opt_result[i, length(par.tmp) + 
-            5]
-          results2[[i]]$kkt <- opt_result[i, (length(par.tmp) + 
-            6):(length(par.tmp) + 7)]
-          results2[[i]]$AIC <- 2 * length(par.tmp) + 2 * 
-            opt_result[i, length(par.tmp) + 1]
-          results2[[i]]$bt.par <- exp(opt_result[i, (1:length(par.tmp))])
-          results2[[i]]$num.grads <- temp[i, ]$ngatend
-          
-          v <- matrix(0, length(par.names), length(par.names))
-          
-          if (distr %in% c("poisson",  "apnormal", "aplnormal")) {
-            v <- deltamethod(
-    g = lapply(paste0('~exp(x', 1:length((par.tmp)-1), ')'), as.formula),
-    mean = as.numeric(opt_result[i, 1:length((par.tmp)-1)]),
-    cov = try(solve(temp[i, ]$nhatend)),
-    ses = FALSE
-)
-          }
-          else {
-            v <- deltamethod(
-            g = lapply(paste0('~exp(x', seq_along(par.tmp), ')'), as.formula),
-            mean = as.numeric(opt_result[i, 1:length(par.tmp)]),
-            cov = try(solve(temp[i, ]$nhatend)),
-            ses = FALSE
-)
-          }
-          results2[[i]]$bt.stdev <- sqrt(diag(v))
-          results2[[i]]$Cor <- cor(v)
-          names(results2[[i]]$num.grads) <- par.names
-          names(results2[[i]]$bt.par) <- par.names
-          names(results2[[i]]$bt.stdev) <- par.names
-          colnames(results2[[i]]$Cor) <- par.names
-          rownames(results2[[i]]$Cor) <- par.names 
-        } else {print('convergencia e meio merdosa')}}
-        return(results2)}      
+  names(results2) = method
+  temp = attr(opt_result, "details")
+  for (i in 1:length(method)) {
+    results2[[i]]$Type <- p
+    results2[[i]]$Dates <- dates
+    names(results2[[i]]$Dates) <- c("ts.start",
+                                    paste0('ts.', seq(1:p)),
+                                    "ts.end")
+    results2[[i]]$Distr <- distr
+    par.names <- c("M", "N0", paste0('P', seq(1:p), ".", rep(fleet.name,p)),
+                   paste(c("k.", "alpha.", "beta."), fleet.name, sep = ""))
+    
+    if (distr %in% c("negbin", "normal" ,
+                     "lognormal",  "gamma",
+                     "roblognormal", "gumbel")) {
+      par.names <- c(par.names, paste("psi.", fleet.name, 
+                                      sep = ""))
+    }
+    
+    results2[[i]]$converg <- "FAIL"
+    results2[[i]]$kkt <- NA
+    results2[[i]]$AIC <- NA
+    results2[[i]]$bt.par <- NA
+    results2[[i]]$num.grads <- NA
+    results2[[i]]$bt.stdev <- NA
+    results2[[i]]$Cor <- matrix(NA, length(par.names), 
+                                length(par.names))
+    
+    print("NAs in the Hessian?")
+    print(any(is.na(temp[i,]$nhatend)))
+    print("Heuristic check of condition")
+    print(1/kappa(temp[i,]$nhatend) > 1e-15)
+    
+    if (length(temp[i, ]$ngatend) == length(par.names) & 
+        !any(is.na(temp[i, ]$nhatend)) & 1/kappa(temp[i, 
+        ]$nhatend) > 1e-15) {
+      results2[[i]]$converg <- opt_result[i, sum(lengths(par.tmp)) + 
+                                            5]
+      results2[[i]]$kkt <- opt_result[i, (sum(lengths(par.tmp)) + 
+                                            6):(sum(lengths(par.tmp)) + 7)]
+      results2[[i]]$AIC <- 2 * sum(lengths(par.tmp)) + 2 * 
+        opt_result[i, sum(lengths(par.tmp)) + 1]
+      results2[[i]]$bt.par <- exp(opt_result[i, (1:sum(lengths(par.tmp)))])
+      results2[[i]]$num.grads <- temp[i, ]$ngatend
+      
+      v <- matrix(0, length(par.names), length(par.names))
+      
+      if (distr %in% c("poisson",  "apnormal", "aplnormal")) {
+        v <- deltamethod(
+          g = lapply(paste0('~exp(x', 1:sum(lengths(par.tmp)), ')'), as.formula),
+          mean = as.numeric(opt_result[i, 1:sum(lengths(par.tmp))]),
+          cov = try(solve(temp[i, ]$nhatend)),
+          ses = FALSE
+        )
+      }
+      else {
+        # consertar isto!!!
+        v <- deltamethod(
+          g = lapply(paste0('~exp(x', seq_along(sum(lengths(par.tmp))), ')'), as.formula),
+          mean = as.numeric(opt_result[i, 1:sum(lengths(par.tmp))]),
+          cov = try(solve(temp[i, ]$nhatend)),
+          ses = FALSE
+        )
+      }
+      results2[[i]]$bt.stdev <- sqrt(diag(v))
+      results2[[i]]$Cor <- cor(v)
+      names(results2[[i]]$num.grads) <- par.names
+      names(results2[[i]]$bt.par) <- par.names
+      names(results2[[i]]$bt.stdev) <- par.names
+      colnames(results2[[i]]$Cor) <- par.names
+      rownames(results2[[i]]$Cor) <- par.names 
+    } else {print('convergencia e meio merdosa')}}
+  return(results2)}      
 ```
 
 ```{r}
 #| echo: false
 #| results: hide
+
+
+Rt = c(5700,40000,3500,
+       21000,2700,9700,
+       55000,3400,16500,
+       10700,14500,2500,
+       22700,12500,34400)
+
+# Rt = rep(10000,15)
+
 par = list(
-  logRt_scaled = log(c(5700,40000,3500,
-                       21000,2700,9700,
-                       55000,3400,16500,
-                       10700,14500,2500,
-                       22700,12500,34400)),
+  logRt_scaled = log(Rt),
   logalpha      = log(1.14),
   logbeta       = log(0.6),
   logK          = log(.000034),
   logN0_scaled  = log(25000),
-  logM          = log(0.1),
-  logsdCt       = log(0.25 * sd(df_effort$catch[df_effort$catch>0]))  # consistent with CatDyn
+  logM          = log(0.1)
+  # logsdCt       = log(0.25 * sd(df_effort$catch[df_effort$catch>0]))  # consistent with CatDyn
 )
 
 
@@ -245,7 +257,7 @@ fit_null =
           k.ini = exp(par$logK),
           alpha.ini = exp(par$logalpha),
           beta.ini  = exp(par$logbeta),
-          distr = distribuicoes[5],
+          distr = distribuicoes[6],
           method = optimizadores[2],
           itnmax = 10000,
           disp = list(100))
@@ -278,6 +290,18 @@ f_m_p = results$`Predicted.F.1/month`/(results$`Predicted.F.1/month` + natural_m
 ```{r}
 #| echo: false
 
+# CatDyn diagnostics
+
+CatDynSum(x = list(fit_null$fit), season = 2022, method = 'spg')
+CatDynCor(x = list(fit_null$fit), method = 'spg',
+          ttl = "sexual healing",
+          arr = c(1,1))
+```
+
+
+```{r}
+#| echo: false
+
 # CatDyn biomass plot
 
 ggplot() + 
@@ -288,8 +312,8 @@ ggplot() +
   geom_ribbon(aes(x = annual_biomass$x,
                   y = annual_biomass$B.ton,
                   ymin= annual_biomass$B.ton- 2*annual_biomass$B.ton.SE*0,
-                  ymax= annual_biomass$B.ton+ 2*annual_biomass$B.ton.SE*0),
-              alpha=0.4) +
+                  ymax= annual_biomass$B.ton+ 2*annual_biomass$B.ton.SE*2),
+              alpha=0.2) +
  theme_bw()
 ```
 
@@ -418,7 +442,7 @@ jnll = function(par) {
   K      = exp(logK)
   N0     = exp(logN0_scaled)
   M      = exp(logM)
-  sdCt   = exp(logsdCt)
+  # sdCt   = exp(logsdCt)
   Rt     = exp(logRt_scaled)
 
   jnll = 0
@@ -446,7 +470,10 @@ predcat = vector("numeric", nT) * alpha
   }
   
   # Negative log-likelihood
-  jnll = -sum(dnorm(log(Ct), mean = log(predcat), sd = logsdCt, log = TRUE))
+  # jnll = -sum(dnorm(Ct, mean = predcat, sd = sdCt, log = TRUE))
+  
+  #adjusted normal profile version
+  jnll = sum(((Ct - predcat)^2)/1^2) # 1 passa para sdCt
   # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
     REPORT(predcat)
   jnll
@@ -525,11 +552,20 @@ ggplot() +
 # report from catdyn
 fit_null$fit$Model$spg
 
+
+report_manual(p = 15,
+              method = 'spg',
+              opt_result = fit_null$fit$optim,
+              dates=c(1,dat$u,length(dat$Ct)),
+              distr = 'apnormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par)
+
 report_manual(p = 15,
               method = 'spg',
               opt_result = spg1,
               dates=c(1,dat$u,length(dat$Ct)),
-              distr = 'aplnormal',
+              distr = 'apnormal',
               fleet.name = cat_df$Properties$Fleets$Fleet,
               par.tmp = par)
 
@@ -557,8 +593,8 @@ xtable(data.frame(
                         exp(fit_nlmimb$par['logM']),  exp(fit_nlmimb_nogr$par['logM'])),
                   N0 = c(cat_pars_1$N0,  exp(spg1['logN0_scaled'])%>% unlist,
                          exp(fit_nlmimb$par['logN0_scaled']),  exp(fit_nlmimb_nogr$par['logN0_scaled'])),
-                  SD_Ct = c("NA", exp(spg1["logsdCt"])%>% unlist,
-                            exp(fit_nlmimb$par['logsdCt']),  exp(fit_nlmimb_nogr$par['logsdCt'])),
+                  # SD_Ct = c("NA", exp(spg1["logsdCt"])%>% unlist,
+                            # exp(fit_nlmimb$par['logsdCt']),  exp(fit_nlmimb_nogr$par['logsdCt'])),
                   R1 = c(cat_pars_1$`P1.MIS+OTB-S`,spg1[1]%>% unlist %>% exp,
                          exp(fit_nlmimb$par[1]),  exp(fit_nlmimb_nogr$par[1])),
                   R2 = c(cat_pars_1$`P2.MIS+OTB-S`,spg1[2]%>% unlist %>% exp,
@@ -695,7 +731,8 @@ predcat = vector("numeric", nT) * alpha
     }
   
   # Negative log-likelihood
-  jnll = -sum(dnorm(log(Ct), mean = log(predcat), sd = logsdCt, log = TRUE))
+  # jnll = -sum(dnorm(log(Ct), mean = log(predcat), sd = logsdCt, log = TRUE))
+    jnll = sum(((Ct - predcat)^2)/1^2)
   # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
     REPORT(predcat)
     REPORT(Kt)
@@ -840,7 +877,8 @@ predcat = vector("numeric", nT) * alpha
   }
   
   # Negative log-likelihood
-  jnll = -sum(dnorm(log(Ct), mean = log(predcat), sd = logsdCt, log = TRUE))
+  # jnll = -sum(dnorm(log(Ct), mean = log(predcat), sd = logsdCt, log = TRUE))
+    jnll = sum(((Ct - predcat)^2)/1^2)
   # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
     REPORT(predcat)
     REPORT(alpha)

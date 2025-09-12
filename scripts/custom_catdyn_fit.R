@@ -13151,8 +13151,10 @@ CatDynFit_2 =
     results$Initial <- exp(par)
     names(results$Initial) <- par.names
     results$Model <- results2
+    results$optim = results1
     class(results) <- "catdyn"
     return(results)
+    
   }
 unlockBinding("CatDynFit", as.environment("package:CatDyn"))
 environment(CatDynFit_2) <- asNamespace('CatDyn')
