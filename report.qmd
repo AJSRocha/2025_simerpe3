@@ -652,6 +652,7 @@ ggplot() +
 #| results: hide
 #| warning: false
 #| echo: false
+#| eval: false
 
 nmult = 1e3
 dat = list()
@@ -813,6 +814,7 @@ ggplot() +
 #| results: hide
 #| warning: false
 #| echo: false
+#| eval: false
 
 nmult = 1e3
 dat = list()
@@ -939,6 +941,7 @@ plsd_at = as.list(sdr_at,"Std")
 
 
 ```
+
 \todo[inline]{NaN warnings were also produced here}
 
 
