@@ -796,6 +796,7 @@ plsd_kt = as.list(sdr_kt,"Std")
 
 ```{r}
 #| echo: false
+#| eval: false
 
 # results from RTMB catch prediction 
 
