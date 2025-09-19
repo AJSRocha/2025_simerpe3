@@ -67,4 +67,58 @@ estimate_catdyn_biomass <- function(par, effort, catch = cat_df$Data$`MIS+OTB-S`
   return(results)
 }
 
+library(msm)  # for deltamethod
+
+estimate_biomass_uncertainty <- function(par, cov_mat, timing, weight_kg_mean, weight_kg_sd) {
+  # Assume: par is on log scale, so we exponentiate
+  par_exp <- exp(par)
+  names(par_exp) <- names(par)
+  
+  M  <- par_exp["M"]
+  N0 <- par_exp["N0"]
+  P1 <- par_exp["P1"]
+  
+  # Create storage vectors
+  n <- length(timing)
+  N_thou       <- numeric(n)
+  N_thou_se    <- numeric(n)
+  B_ton        <- numeric(n)
+  B_ton_se     <- numeric(n)
+  
+  for (i in seq_along(timing)) {
+    # Predict abundance in thousands
+    Pt <- timing[i] * P1
+    Nt <- N0 * exp(-M) + Pt * exp(-M)
+    N_thou[i] <- Nt
+    
+    # Delta method SE for Nt
+    # Define function g: N = N0 * exp(-M) + P * exp(-M)
+    # Variables: M (x1), N0 (x2), P (x3)
+    g <- ~ x2 * exp(-x1) + x3 * exp(-x1)
+    
+    mean_vals <- c(M, N0, Pt)
+    cov_sub <- cov_mat[c("M", "N0", "P1"), c("M", "N0", "P1")]
+    
+    # SE for abundance
+    N_se <- deltamethod(g, mean = mean_vals, cov = cov_sub)
+    N_thou_se[i] <- N_se
+    
+    # Biomass in tonnes
+    B_ton[i] <- 1000 * Nt * weight_kg_mean * 0.001
+    
+    # SE for biomass using error propagation
+    B_ton_se[i] <- sqrt(
+      (1000 * N_se)^2 * (weight_kg_mean * 0.001)^2 +
+        (1000 * Nt)^2 * (weight_kg_sd * 0.001)^2
+    )
+  }
+  
+  return(data.frame(
+    timestep = seq_along(timing),
+    N_thou = N_thou,
+    N_thou_se = N_thou_se,
+    B_ton = B_ton,
+    B_ton_se = B_ton_se
+  ))
+}
 
