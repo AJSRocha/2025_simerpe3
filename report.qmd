@@ -560,7 +560,7 @@ report_manual(p = 15,
               distr = 'apnormal',
               fleet.name = cat_df$Properties$Fleets$Fleet,
               par.tmp = par)
-
+cobaia =
 report_manual(p = 15,
               method = 'spg',
               opt_result = spg1,

@@ -5,6 +5,8 @@ method = "spg"
 multi = T
 mbw.sd = predicos
 nmult = 1000
+dates = cat_df$Properties$Dates
+df = cat_df
 # scaler =    Thou.scaler <- 1e+06 * (x$Data$Properties$Units[4] == 
 #                                       "bill") + 1000 * (x$Data$Properties$Units[4] == 
   #                                                         "mill") + 1 * (x$Data$Properties$Units[4] == "thou") + 
@@ -12,7 +14,8 @@ nmult = 1000
 
 
 
-function (x, method, multi, mbw.sd) 
+function (x, df, dates, 
+          method, multi, mbw.sd) 
 
 PopDyn  = data.frame(M = x[[method]]$bt.par$M, 
                      SE.M = x[[method]]$bt.stdev["M"],
@@ -20,28 +23,37 @@ PopDyn  = data.frame(M = x[[method]]$bt.par$M,
                      SE.N0 = nmult * x[[method]]$bt.stdev["N0"])
 
 # se houver NAs nos stdev, corrigir aqui. Ver CatdynBSD()
-
+if (is.na(PopDyn[2])) {
+  PopDyn[2] <- PopDyn[1] * mean(unlist(x[[method]]$bt.stdev[which(!is.na(x[[method]]$bt.stdev))])/
+                                  unlist(x[[method]]$bt.par[which(!is.na(x[[method]]$bt.stdev))]))
+}
+if (is.na(PopDyn[4])) {
+  PopDyn[4] <- PopDyn[3] * mean(unlist(x[[method]]$bt.stdev[which(!is.na(x[[method]]$bt.stdev))])/
+                                  unlist(x[[method]]$bt.par[which(!is.na(x[[method]]$bt.stdev))]))
+}
 
     Perts = data.frame(Pest = unlist(x[[method]]$bt.par[grep("P", names(x[[method]]$bt.par))]) * nmult, 
                         SE.Pest = unlist(x[[method]]$bt.stdev[grep("P.",names(x[[method]]$bt.par))]) * nmult, 
                         tsteps = x[[method]]$Dates[-c(1,length(x[[method]]$Dates))])
+# se houver NAs nos stdev, corrigir aqui. Ver CatdynBSD() 
+    if (any(is.na(Perts$SE.Pest))) {
+      Perts$SE.Pest[which(is.na(Perts$SE.Pest))] <- Perts$Pest[which(is.na(Perts$SE.Pest))] * 
+        mean(Perts$SE.Pest[which(!is.na(Perts$SE.Pest))]/Perts$Pest[which(!is.na(Perts$SE.Pest))])
+    }
     
-# se houver NAs nos stdev, corrigir aqui. Ver CatdynBSD()    
+   
     
     mt = x[[method]]$Type # nr de perturbacoes
     
      
 
     if (length(x$Data$Properties$Fleets$Fleet) == 1) {
-      mt <- x$Model[[method]]$Type
+      mt <- x[[method]]$Type
       
       Timing_2 = matrix(0, nrow = 12 * mt, ncol = 1)
       for (j in 1:mt) {
         Timing_2[Perts$tsteps[j]:(j*12)] = 1 # .
       }  
-      
-      
-      cbind(Timing, Timing_2) %>% View
       
       
       Cov.Mat <- cor2cov(cor.mat = x[[method]]$Cor[c(1:(mt + 2)),
@@ -51,24 +63,17 @@ PopDyn  = data.frame(M = x[[method]]$bt.par$M,
       
       
       
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      
-      
+      yr1 <- as.numeric(format(as.Date(dates[1]), 
+                               "%Y"))
+      yr2 <- as.numeric(format(as.Date(dates[2]), 
+                               "%Y"))
+      class(x) = "catdyn"
+      x$Model = x
+      x$Data = df
+      z <- CatDynPred(x, method)
       
 
-      yr1 <- as.numeric(format(as.Date(x$Data$Properties$Dates[1]), 
-                               "%Y"))
-      yr2 <- as.numeric(format(as.Date(x$Data$Properties$Dates[2]), 
-                               "%Y"))
-      z <- CatDynPred(x, method)
+      
       PredStock <- data.frame(Year = sort(rep(yr1:yr2, 
                                               12)), Month = c("Jan", "Feb", "Mar", "Apr", 
                                                               "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", 
