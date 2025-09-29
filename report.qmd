@@ -476,6 +476,7 @@ predcat = vector("numeric", nT) * alpha
   jnll = sum(((Ct - predcat)^2)/1^2) # 1 passa para sdCt
   # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
     REPORT(predcat)
+    REPORT(nstep)
   jnll
 
 }
@@ -552,7 +553,7 @@ ggplot() +
 # report from catdyn
 fit_null$fit$Model$spg
 
-
+cobaia_ref = 
 report_manual(p = 15,
               method = 'spg',
               opt_result = fit_null$fit$optim,
