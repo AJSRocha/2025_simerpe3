@@ -38,6 +38,65 @@ ggplot() +
 
 
 
+effort_df = cat_df$Data$`MIS+OTB-S` %>% 
+  transmute(time = time.step,
+            fleet = "MIS+OTB-S",
+            effort = obseff.trips)
+
+rep = cobaia_ref[["spg"]]
+
+
+manual_biomass_estimate <- function(report_out, effort_df, method = "spg") {
+  # Extract from report
+  rep <- report_out[[method]]
+  bt.par <- rep$bt.par
+  dates <- rep$Dates
+  fleets <- gsub("^P\\d+\\.", "", grep("^P", names(bt.par), value = TRUE))
+  p <- rep$Type  # number of time blocks
+  
+  # Initial abundance and natural mortality
+  N0 <- bt.par["N0"]
+  M <- bt.par["M"]
+  
+  # Get catchability (P1.FleetA, P2.FleetA, etc.)
+  P_vals <- bt.par[grep("^P\\d+\\.", names(bt.par))]
+  names(P_vals) <- gsub("^P\\d+\\.", "", names(P_vals))  # simplify names to just fleet
+  
+  # Time structure
+  # time_seq <- seq(as.Date(dates["ts.start"]), as.Date(dates["ts.end"]), by = "week")
+  n_time <- max(effort_df$time)
+  
+  period_indices <- ceiling((1:n_time) / (n_time / p))
+  biomass <- numeric(n_time)
+  biomass[1] <- N0
+  
+  # Main loop
+  for (t in 2:n_time) {
+    F_total <- 0
+    
+    # Effort for previous time step (t-1)
+    day_effort <- effort_df[effort_df$time == (t - 1), ]
+    
+    for (fleet in fleets) {
+      fleet_effort <- sum(day_effort$effort[day_effort$fleet == fleet])
+      period <- period_indices[t - 1]
+      P_name <- paste0("P", period, ".", fleet)
+      q <- bt.par[P_name]
+      F_total <- F_total + q * fleet_effort
+    }
+    
+    Z <- M + F_total
+    biomass[t] <- biomass[t - 1] * exp(-Z)
+  }
+  
+  # Return results
+  return(data.frame(
+    timestep = 1:n_time,
+    biomass = biomass
+  ))
+}
+
+res = manual_biomass_estimate(cobaia_ref, effort_df)
 
 
 
