@@ -92,7 +92,7 @@ manual_biomass_estimate <- function(report_out, effort_df, method = "spg") {
   # Return results
   return(data.frame(
     timestep = 1:n_time,
-    biomass = biomass
+    biomass = unlist(biomass)
   ))
 }
 
