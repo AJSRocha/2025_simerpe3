@@ -42,6 +42,7 @@ library(RTMB)
 library(optimx)
 library(wesanderson)
 library(tidyverse)
+library(ggpattern)
 library(xtable)
 library(tmbstan)
 library(shinystan)
@@ -178,7 +179,276 @@ report_manual = function(p, method, dates,
       colnames(results2[[i]]$Cor) <- par.names
       rownames(results2[[i]]$Cor) <- par.names 
     } else {print('convergencia e meio merdosa')}}
-  return(results2)}      
+  return(results2)}
+
+
+# report_manual_beta <- function(p, method, dates,
+#                                distr, fleet.name, par.tmp,
+#                                opt_result) {
+#   
+#   results2 <- vector("list", length(method))
+#   names(results2) <- method
+#   
+#   # Try to get optimization details safely
+#   temp <- attr(opt_result, "details")
+#   if (is.null(temp)) temp <- list()
+#   
+#   # --- 1. Build parameter names dynamically ---
+#   par.names <- unlist(lapply(names(par.tmp), function(nm) {
+#     vals <- par.tmp[[nm]]
+#     if (length(vals) == 1) return(nm)
+#     paste0(nm, ".", seq_along(vals))
+#   }))
+#   np <- length(par.names)
+#   
+#   # --- 2. Match parameter names with opt_result columns ---
+#   colnames_res <- colnames(opt_result)
+#   par.cols <- which(colnames_res %in% par.names)
+#   
+#   if (length(par.cols) != np) {
+#     warning("Number of matched parameters (", length(par.cols),
+#             ") does not match expected (", np, ").")
+#   }
+#   
+#   for (i in seq_along(method)) {
+#     results2[[i]] <- list()
+#     results2[[i]]$Type <- p
+#     results2[[i]]$Dates <- dates
+#     names(results2[[i]]$Dates) <- c("ts.start", paste0("ts.", seq_len(p)), "ts.end")
+#     results2[[i]]$Distr <- distr
+#     
+#     # Initialize result slots
+#     results2[[i]]$converg <- "FAIL"
+#     results2[[i]]$kkt <- NA
+#     results2[[i]]$AIC <- NA
+#     results2[[i]]$bt.par <- rep(NA, np)
+#     results2[[i]]$num.grads <- rep(NA, np)
+#     results2[[i]]$bt.stdev <- rep(NA, np)
+#     results2[[i]]$Cor <- matrix(NA, np, np)
+#     
+#     # --- 3. Extract parameter estimates ---
+#     if (length(par.cols) > 0) {
+#       theta_hat <- as.numeric(opt_result[i, par.cols, drop = TRUE])
+#       names(theta_hat) <- par.names
+#     } else {
+#       warning("No parameter columns matched for method ", method[i])
+#       next
+#     }
+#     
+#     # --- 4. Pull diagnostic columns if they exist ---
+#     converg <- opt_result[i, "convcode", drop = TRUE]
+#     if (is.na(converg)) converg <- "UNK"
+#     
+#     results2[[i]]$converg <- converg
+#     if ("kkt1" %in% colnames_res && "kkt2" %in% colnames_res)
+#       results2[[i]]$kkt <- unlist(opt_result[i, c("kkt1", "kkt2")])
+#     
+#     if ("value" %in% colnames_res)
+#       results2[[i]]$AIC <- 2 * np + 2 * as.numeric(opt_result[i, "value"])
+#     
+#     # --- 5. Back-transform parameters ---
+#     results2[[i]]$bt.par <- exp(theta_hat)
+#     
+#     # --- 6. Try gradients and Hessian ---
+#     ngat <- NULL
+#     nhat <- NULL
+#     if (length(temp) >= i && !is.null(temp[[i]]$ngatend))
+#       ngat <- temp[[i]]$ngatend
+#     if (length(temp) >= i && !is.null(temp[[i]]$nhatend))
+#       nhat <- temp[[i]]$nhatend
+#     
+#     if (!is.null(ngat) && length(ngat) == np)
+#       results2[[i]]$num.grads <- ngat
+#     
+#     # --- 7. Delta-method standard errors (if Hessian available) ---
+#     if (!is.null(nhat) && all(dim(nhat) == c(np, np)) && !any(is.na(nhat))) {
+#       cov.try <- try(solve(nhat), silent = TRUE)
+#       if (!inherits(cov.try, "try-error")) {
+#         v <- deltamethod(
+#           g = lapply(paste0("~exp(x", seq_len(np), ")"), as.formula),
+#           mean = theta_hat,
+#           cov = cov.try,
+#           ses = FALSE
+#         )
+#         results2[[i]]$bt.stdev <- sqrt(diag(v))
+#         results2[[i]]$Cor <- cor(v)
+#       } else {
+#         warning("Hessian inversion failed for method ", method[i])
+#       }
+#     } else {
+#       message("No valid Hessian for method ", method[i])
+#     }
+#     
+#     # --- 8. Name all outputs ---
+#     names(results2[[i]]$bt.par) <- par.names
+#     names(results2[[i]]$num.grads) <- par.names
+#     names(results2[[i]]$bt.stdev) <- par.names
+#     rownames(results2[[i]]$Cor) <- par.names
+#     colnames(results2[[i]]$Cor) <- par.names
+#   }
+#   
+#   return(results2)
+# }
+
+report_manual_beta <- function(p, method, dates,
+                               distr, fleet.name, par.tmp,
+                               opt_result) {
+  
+  `%||%` <- function(x, y) if (!is.null(x)) x else y
+  
+  results2 <- vector("list", length(method))
+  names(results2) <- method
+  
+  # --- Build dynamic parameter names ---
+  par.names <- unlist(lapply(names(par.tmp), function(nm) {
+    vals <- par.tmp[[nm]]
+    if (length(vals) == 1) nm else paste0(nm, ".", seq_len(length(vals) - 1))
+  }))
+  par.names <- unique(c(gsub("\\.1$", "", par.names), par.names))
+  
+  par.cols <- which(colnames(opt_result) %in% par.names)
+  np <- length(par.cols)
+  if (np == 0) stop("No parameter columns matched in opt_result.")
+  
+  temp <- attr(opt_result, "details")
+  if (is.null(temp)) stop("No details attribute found in opt_result — cannot extract Hessian.")
+  
+  for (i in seq_along(method)) {
+    results2[[i]] <- list(
+      Type = p,
+      Dates = setNames(dates, c("ts.start", paste0("ts.", seq_len(p)), "ts.end")),
+      Distr = distr,
+      converg = "FAIL",
+      kkt = NA,
+      AIC = NA,
+      bt.par = rep(NA, np),
+      num.grads = rep(NA, np),
+      bt.stdev = rep(NA, np),
+      # Cor = matrix(0, np, np)
+      Cor = matrix(NA, np, np)
+    )
+    
+    # --- Extract coefficients ---
+    theta_hat <- as.numeric(opt_result[i, par.cols])
+    names(theta_hat) <- colnames(opt_result)[par.cols]
+    results2[[i]]$bt.par <- exp(theta_hat)
+    
+    # --- Diagnostics ---
+    if ("convcode" %in% names(opt_result))
+      results2[[i]]$converg <- as.character(opt_result[i, "convcode"])
+    if (all(c("kkt1", "kkt2") %in% names(opt_result)))
+      results2[[i]]$kkt <- unlist(opt_result[i, c("kkt1", "kkt2")])
+    if ("value" %in% names(opt_result))
+      results2[[i]]$AIC <- 2 * np + 2 * as.numeric(opt_result[i, "value"])
+    
+    # --- Gradient ---
+    grad.candidates <- c("ngatend", "grad", "gradient", "Grad")
+    for (gc in grad.candidates) {
+      if (gc %in% names(temp[[i]])) {
+        results2[[i]]$num.grads <- temp[[i]][[gc]]
+        break
+      }
+    }
+    
+    # --- Hessian ---
+    nhat <- NULL
+    hc <- NULL
+
+    # Case 1: details is a list of lists (normal)
+    if (length(temp) >= i && is.list(temp[[i]])) {
+      hess.candidates <- c("nhatend", "Hess", "hess", "hessian", "Hessian")
+      for (hc_try in hess.candidates) {
+        if (hc_try %in% names(temp[[i]])) {
+          nhat <- temp[[i]][[hc_try]]
+          hc <- hc_try
+          break
+        }
+      }
+    }
+
+    # Case 2: Hessian stored directly at a fixed index (like [[3]])
+    if (is.null(nhat) && length(temp) >= 3 && is.matrix(temp[[3]])) {
+      nhat <- temp[[3]]
+      hc <- "direct[[3]]"
+    }
+    
+    # --- Compute SE and correlations if Hessian is valid ---
+    if (is.matrix(nhat) && all(dim(nhat) == c(np, np)) && !any(is.na(nhat))) {
+      message("✅ Found Hessian field '", hc, "' for method ", method[i])
+      cov.try <- try(solve(nhat), silent = TRUE)
+      if (!inherits(cov.try, "try-error")) {
+        
+        
+        v <- deltamethod(
+          g = lapply(paste0("~exp(x", seq_len(np), ")"), as.formula),
+          mean = theta_hat,
+          cov = cov.try,
+          ses = FALSE
+        )
+        results2[[i]]$bt.stdev <- sqrt(diag(v))
+        results2[[i]]$Cor <- cor(v)
+      } else {
+  # Try pseudoinverse fallback
+  message("⚠️ Using pseudoinverse for Hessian (ill-conditioned matrix)")
+  if (!requireNamespace("MASS", quietly = TRUE)) stop("Package MASS required for pseudoinverse")
+  cov.try <- MASS::ginv(nhat)
+  v <- deltamethod(
+    g = lapply(paste0("~exp(x", seq_len(np), ")"), as.formula),
+    mean = theta_hat,
+    cov = cov.try,
+    ses = FALSE
+  )
+  # } else {
+        # warning("⚠️ Hessian inversion failed for method ", method[i])
+      }
+    } else {
+      message("⚠️ No valid Hessian found for method ", method[i])
+    }
+    
+    # --- Label everything ---
+    nms <- colnames(opt_result)[par.cols]
+    names(results2[[i]]$bt.par) <- nms
+    names(results2[[i]]$num.grads) <- nms
+    names(results2[[i]]$bt.stdev) <- nms
+    rownames(results2[[i]]$Cor) <- nms
+    colnames(results2[[i]]$Cor) <- nms
+  }
+  
+  return(results2)
+}
+
+getFfromCatch <- function(C, N, M, dt = 1, upper = 10) {
+  # Ensure vectors are the same length
+  C <- as.numeric(C)
+  N <- as.numeric(N)
+  M <- as.numeric(M)
+  if (length(M) == 1) M <- rep(M, length(C))
+  
+  Fout <- numeric(length(C))
+  
+  for (i in seq_along(C)) {
+    # Handle invalid or zero cases
+    if (is.na(C[i]) || is.na(N[i]) || N[i] <= 0 || C[i] <= 0) {
+      Fout[i] <- NA
+      next
+    }
+    
+    # Define function whose root we want
+    f <- function(F) N[i] * (F / (F + M[i])) * (1 - exp(-(F + M[i]) * dt)) - C[i]
+    
+    # Catch cannot exceed total removals (sanity check)
+    maxC <- N[i] * (1 - exp(-M[i] * dt))
+    if (C[i] > maxC) warning(sprintf("Catch[%d] > possible removals; check data.", i))
+    
+    # Solve for F
+    root <- try(uniroot(f, lower = 1e-8, upper = upper)$root, silent = TRUE)
+    Fout[i] <- if (inherits(root, "try-error")) NA else root
+  }
+  
+  return(Fout)
+}
+
+
 ```
 
 ```{r}
@@ -299,6 +569,9 @@ CatDynCor(x = list(fit_null$fit), method = 'spg',
           arr = c(1,1))
 ```
 
+\[
+C = N \cdot \frac{F}{F + M} \cdot \left(1 - e^{-(F + M)\,\Delta t}\right)
+\]
 
 ```{r}
 #| echo: false
@@ -315,7 +588,7 @@ ggplot() +
                   ymin= annual_biomass$B.ton- 2*annual_biomass$B.ton.SE*0,
                   ymax= annual_biomass$B.ton+ 2*annual_biomass$B.ton.SE*2),
               alpha=0.2) +
- theme_bw()
+ theme_bw() + labs(x = 'year', y = 'Biomass (tons)')
 ```
 
 ```{r}
@@ -1187,7 +1460,7 @@ ambient = vector("numeric", nT) * alpha
 predcat = vector("numeric", nT) * alpha
 
 
-# seasons = ceiling(1:nT / 12)
+seasons = ceiling(1:nT / 12)
 
   mccum[1] = 0
   nstep[1] <- N0 * exp(-M)
@@ -1208,7 +1481,7 @@ predcat = vector("numeric", nT) * alpha
     jnll = sum(((Ct - predcat)^2)/1^2)
   # if (is.null(Rt)) stop("Rt is NULL — check if Rt_scaled was passed correctly.")
     REPORT(predcat)
-    REPORT(beta)
+    REPORT(gamma)
     REPORT(nstep)
   jnll
 
@@ -1277,8 +1550,9 @@ ggplot() +
 nmult = 1e3
 dat = list()
 dat$Ct = as.vector(cat_df$Data$`MIS+OTB-S`$obscat.thou)         # observed catch
-# dat$Et = as.vector(cat_df$Data$`MIS+OTB-S`$obseff.trips)       # effort
+dat$Et = as.vector(cat_df$Data$`MIS+OTB-S`$obseff.trips)       # effort
 dat$u = unlist(indice_manual)
+dat$Rf = rain$precip[12:27]# recruitment pulse months
 # dat$Rf = rain$precip[12:27]# recruitment pulse months
 nT = length(dat$Ct)
 nR = length(dat$u)
@@ -1300,12 +1574,12 @@ par_nf = par[-2]
 # initialize joint negative loglikelihood function
 
 jnll_nf = function(par_nf) {
-  getAll(par_nf, dat)
+  getAll(par_nf, dat[-c(2,4)])
 
   # Extract parameters
   Ct     = OBS(Ct)
   # Et     = OBS(Et)
-  Rf = OBS(Rf)
+  # Rf = OBS(Rf)
   I  = OBS(I)
   # alpha  = exp(logalpha)
   beta   = exp(logbeta)
@@ -1403,113 +1677,526 @@ ggplot() +
   geom_line(aes(x = 1:length(dat$Ct),
                 y = catch_cat)) + 
    geom_line(aes(x = 1:length(dat$Ct),
-                y = predicted_catch_rf), col = 'red') +
+                y = predicted_catch_nf), col = 'red') +
      geom_line(aes(x = 1:length(dat$Ct),
                 y = dat$Ct), linetype = 'dashed')
 ```
 
 
 
+```{r}
+#| echo: false
+#| eval: false
+
+# results from RTMB catch prediction 
+
+todos = data.frame(x = 1:nT,
+                   base = predicted_catch,
+                   kt = predicted_catch_kt,
+                   at = predicted_catch_at,
+                   bt = predicted_catch_bt,
+                   rf = predicted_catch_rf,
+                   simp = predicted_catch_nf) %>% pivot_longer(cols = -c(x)) %>% 
+  mutate(data = rep(dat$Ct, each = 6))
+
+todos %>% 
+ggplot() + 
+  geom_line(aes(x = x,
+                y = value,
+            group = name,
+            color = name), size = 1) +
+     geom_line(aes(x = x,
+                y = data,
+                group = 1), linetype = 'dashed', size = 0.5) + 
+  facet_wrap(.~name, ncol = 2) + 
+  theme_bw() + 
+  labs(x = '', y = 'tons', color = '') + 
+  theme(legend.position = 'none') + 
+  scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(6))
+```
 
 
 
+```{r}
+
+data_frame(year = 2006:2020,
+           Kt = obj_kt$report()$Kt,
+           at = obj_at$report()$alph,
+           bt = obj_bt$report()$beta) %>% 
+  pivot_longer(cols = -c(year)) %>% 
+  ggplot() + 
+  geom_line(aes(x = year,
+                y = value,
+                group = name,
+                color = name),
+            size = 1) + 
+  facet_wrap(.~name, ncol = 1, scale = 'free_y') + 
+  scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(3)) +
+  theme_bw() + 
+  labs(x = '', y = '', color = '') +
+  theme(legend.position = 'none') 
+
+
+```
+
+```{r}
+
+
+```
+
+
+```{r}
+library(numDeriv)
+# CatDyn
+
+fit_null$fit$Model$spg$bt.par
+fit_null$fit$Model$spg$bt.stdev
+fit_null$fit$Model$spg$Cor -> queca
 
 
 
+# base
+
+rep_1 =
+report_manual_beta(p = 15,
+              method = 'spg',
+              opt_result = spg1,
+              dates=c(1,dat$u,length(dat$Ct)),
+              distr = 'apnormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par)
+
+rep_1$spg$bt.par
+rep_1$spg$bt.stdev
+rep_1$spg$Cor
 
 
+# kt
+rep_kt =
+report_manual_beta(p = 15,
+              method = 'spg',
+              opt_result = spg1_kt,
+              dates=c(1,dat$u,length(dat$Ct)),
+              distr = 'apnormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par_kt)
+
+exp(spg1_kt)
+rep_kt$spg$bt.par
+rep_kt$spg$bt.stdev
+rep_kt$spg$Cor
+
+# at
+rep_at =
+report_manual_beta(p = 15,
+              method = 'spg',
+              opt_result = spg1_at,
+              dates=c(1,dat$u,length(dat$Ct)),
+              distr = 'apnormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par_at)
+
+exp(spg1_at)
+rep_at$spg$bt.par
+rep_at$spg$bt.stdev
+rep_at$spg$Cor %>% hist
 
 
+# bt
+rep_bt =
+report_manual_beta(p = 15,
+              method = 'spg',
+              opt_result = spg1_bt,
+              dates=c(1,dat$u,length(dat$Ct)),
+              distr = 'apnormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par_bt)
+
+exp(spg1_bt)
+rep_bt$spg$bt.par
+rep_bt$spg$bt.stdev
+rep_bt$spg$Cor
 
 
+# rf
+rep_rf =
+report_manual_beta(p = 15,
+              method = 'spg',
+              opt_result = spg1_rf,
+              dates=c(1,dat$u,length(dat$Ct)),
+              distr = 'apnormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par_rf)
+
+exp(spg1_rf)
+rep_rf$spg$bt.par
+rep_rf$spg$bt.stdev
+rep_rf$spg$Cor
+
+# nf
+rep_nf =
+report_manual_beta(p = 15,
+              method = 'spg',
+              opt_result = spg1_nf,
+              dates=c(1,dat$u,length(dat$Ct)),
+              distr = 'apnormal',
+              fleet.name = cat_df$Properties$Fleets$Fleet,
+              par.tmp = par_nf)
+
+exp(spg1_nf)
+rep_nf$spg$bt.par
+rep_nf$spg$bt.stdev
+rep_nf$spg$Cor
+
+```
 
 
+```{r}
+# M
+data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct') %>%
+             factor(levels =  c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct'),
+                    ordered = T),
+           estimate = c(fit_null$fit$Model$spg$bt.par$M,
+                      rep_1$spg$bt.par['logM'],
+                      rep_kt$spg$bt.par['logM'],
+                      rep_at$spg$bt.par['logM'],
+                      rep_bt$spg$bt.par['logM'],
+                      rep_rf$spg$bt.par['logM'],
+                      rep_nf$spg$bt.par['logM']),
+           dev = c(fit_null$fit$Model$spg$bt.stdev['M'],
+                      rep_1$spg$bt.stdev['logM'],
+                      rep_kt$spg$bt.stdev['logM'],
+                      rep_at$spg$bt.stdev['logM'],
+                      rep_bt$spg$bt.stdev['logM'],
+                      rep_rf$spg$bt.stdev['logM'],
+                      rep_nf$spg$bt.stdev['logM'])) %>% 
+  mutate(dev = ifelse(is.na(dev), 0, dev)) %>% 
+  ggplot() + 
+  geom_bar_pattern(aes(x = models,
+               y = estimate + 2 * dev),
+               stat = 'sum') +
+   geom_bar(aes(x = models,
+               y = estimate),
+               stat = 'sum',
+            fill = colorRampPalette(wes_palette('Zissou1'))(5)[1]) +
+  theme_bw() + 
+  labs(title = 'M', y = '') + 
+  theme(legend.position = 'none') 
 
 
+data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct') %>%
+             factor(levels =  c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct'),
+                    ordered = T),
+           estimate = c(fit_null$fit$Model$spg$bt.par$N0,
+                      rep_1$spg$bt.par['logN0_scaled'],
+                      rep_kt$spg$bt.par['logN0_scaled'],
+                      rep_at$spg$bt.par['logN0_scaled'],
+                      rep_bt$spg$bt.par['logN0_scaled'],
+                      rep_rf$spg$bt.par['logN0_scaled'],
+                      rep_nf$spg$bt.par['logN0_scaled']),
+           dev = c(fit_null$fit$Model$spg$bt.stdev['N0'],
+                      rep_1$spg$bt.stdev['logN0_scaled'],
+                      rep_kt$spg$bt.stdev['logN0_scaled'],
+                      rep_at$spg$bt.stdev['logN0_scaled'],
+                      rep_bt$spg$bt.stdev['logN0_scaled'],
+                      rep_rf$spg$bt.stdev['logN0_scaled'],
+                      rep_nf$spg$bt.stdev['logN0_scaled'])) %>% 
+  mutate(dev = ifelse(is.na(dev), 0, dev)) %>% 
+  ggplot() + 
+  geom_bar_pattern(aes(x = models,
+               y = estimate + 2 * dev),
+               stat = 'sum') +
+   geom_bar(aes(x = models,
+               y = estimate),
+               stat = 'sum',
+            fill = colorRampPalette(wes_palette('Zissou1'))(5)[2]) +
+  theme_bw() + 
+  labs(title = 'N0', y = '') + 
+  theme(legend.position = 'none') 
+
+data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct') %>%
+             factor(levels =  c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct'),
+                    ordered = T),
+           estimate = c(fit_null$fit$Model$spg$bt.par$`k.MIS+OTB-S`,
+                      rep_1$spg$bt.par['logK'],
+                      rep_kt$spg$bt.par['logK'],
+                      rep_at$spg$bt.par['logK'],
+                      rep_bt$spg$bt.par['logK'],
+                      rep_rf$spg$bt.par['logK'],
+                      rep_nf$spg$bt.par['logK']),
+           dev = c(fit_null$fit$Model$spg$bt.stdev['k.MIS+OTB-S'],
+                      rep_1$spg$bt.stdev['logK'],
+                      rep_kt$spg$bt.stdev['logK'],
+                      rep_at$spg$bt.stdev['logK'],
+                      rep_bt$spg$bt.stdev['logK'],
+                      rep_rf$spg$bt.stdev['logK'],
+                      rep_nf$spg$bt.stdev['logK'])) %>% 
+  mutate(dev = ifelse(is.na(dev), 0, dev)) %>% 
+  ggplot() + 
+  geom_bar_pattern(aes(x = models,
+               y = estimate + 2 * dev),
+               stat = 'sum') +
+   geom_bar(aes(x = models,
+               y = estimate),
+               stat = 'sum',
+            fill = colorRampPalette(wes_palette('Zissou1'))(5)[3]) +
+  theme_bw() + 
+  labs(title = 'K', y = '') + 
+  theme(legend.position = 'none')
 
 
+data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct') %>%
+             factor(levels =  c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct'),
+                    ordered = T),
+           estimate = c(fit_null$fit$Model$spg$bt.par$`alpha.MIS+OTB-S`,
+                      rep_1$spg$bt.par['logalpha'],
+                      rep_kt$spg$bt.par['logalpha'],
+                      rep_at$spg$bt.par['logalpha'],
+                      rep_bt$spg$bt.par['logalpha'],
+                      rep_rf$spg$bt.par['logalpha'],
+                      rep_nf$spg$bt.par['logalpha']),
+           dev = c(fit_null$fit$Model$spg$bt.stdev['alpha.MIS+OTB-S'],
+                      rep_1$spg$bt.stdev['logalpha'],
+                      rep_kt$spg$bt.stdev['logalpha'],
+                      rep_at$spg$bt.stdev['logalpha'],
+                      rep_bt$spg$bt.stdev['logalpha'],
+                      rep_rf$spg$bt.stdev['logalpha'],
+                      rep_nf$spg$bt.stdev['logalpha'])) %>% 
+  mutate(dev = ifelse(is.na(dev), 0, dev)) %>% 
+  ggplot() + 
+  geom_bar_pattern(aes(x = models,
+               y = estimate + 2 * dev),
+               stat = 'sum') +
+   geom_bar(aes(x = models,
+               y = estimate),
+               stat = 'sum',
+            fill = colorRampPalette(wes_palette('Zissou1'))(5)[4]) +
+  theme_bw() + 
+  labs(title = 'alpha', y = '') + 
+  theme(legend.position = 'none') 
+
+data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct') %>%
+             factor(levels =  c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct'),
+                    ordered = T),
+           estimate = c(fit_null$fit$Model$spg$bt.par$`beta.MIS+OTB-S`,
+                      rep_1$spg$bt.par['logbeta'],
+                      rep_kt$spg$bt.par['logbeta'],
+                      rep_at$spg$bt.par['logbeta'],
+                      rep_bt$spg$bt.par['logbeta'],
+                      rep_rf$spg$bt.par['logbeta'],
+                      rep_nf$spg$bt.par['logbeta']),
+           dev = c(fit_null$fit$Model$spg$bt.stdev['beta.MIS+OTB-S'],
+                      rep_1$spg$bt.stdev['logbeta'],
+                      rep_kt$spg$bt.stdev['logbeta'],
+                      rep_at$spg$bt.stdev['logbeta'],
+                      rep_bt$spg$bt.stdev['logbeta'],
+                      rep_rf$spg$bt.stdev['logbeta'],
+                      rep_nf$spg$bt.stdev['logbeta'])) %>% 
+  mutate(dev = ifelse(is.na(dev), 0, dev)) %>% 
+  ggplot() + 
+  geom_bar_pattern(aes(x = models,
+               y = estimate + 2 * dev),
+               stat = 'sum') +
+   geom_bar(aes(x = models,
+               y = estimate),
+               stat = 'sum',
+            fill = colorRampPalette(wes_palette('Zissou1'))(5)[5]) +
+  theme_bw() + 
+  labs(title = 'beta', y = '') + 
+  theme(legend.position = 'none') 
+
+```
 
 
+```{r}
+data.frame(Parameters = c('M', 'N0', 'k', 'alpha', 'beta') %>%
+             factor(levels = c('M', 'N0', 'k', 'alpha', 'beta'),
+                    ordered = T),
+           estimate = c(fit_null$fit$Model$spg$bt.par$M,
+                        fit_null$fit$Model$spg$bt.par$N0,
+                        fit_null$fit$Model$spg$bt.par$`k.MIS+OTB-S`,
+                        fit_null$fit$Model$spg$bt.par$`alpha.MIS+OTB-S`,
+                        fit_null$fit$Model$spg$bt.par$`beta.MIS+OTB-S`),
+           dev = c(fit_null$fit$Model$spg$bt.stdev['M'],
+                   fit_null$fit$Model$spg$bt.stdev['N0'],
+                   fit_null$fit$Model$spg$bt.stdev['k.MIS+OTB-S'],
+                   fit_null$fit$Model$spg$bt.stdev['alpha.MIS+OTB-S'],
+                   fit_null$fit$Model$spg$bt.stdev['beta.MIS+OTB-S']
+                      )) %>% 
+  mutate(dev = ifelse(is.na(dev), 0, dev)) %>% 
+  ggplot() + 
+  geom_bar_pattern(aes(x = Parameters,
+               y = log(estimate + 2 * dev)),
+               stat = 'sum') +
+   geom_bar(aes(x = Parameters,
+               y = log(estimate)),
+               stat = 'sum',
+            fill = colorRampPalette(wes_palette('Zissou1'))(5)[1]) +
+  theme_bw() + 
+  labs(title = 'Base fit in CatDyb', y = '') + 
+  theme(legend.position = 'none') 
 
-\todo[inline]{NaN warnings were also produced here}
-
-
-\begin{abstract}
-
-Polvo e o caralho (\cite{alemany_bayesian_2017})
-
-
-\begin{keywords}
-Bayesian, parametric, $p$-value, ICES
-\end{keywords}
-\end{abstract}
-
-
-
-\section{Introduction\label{intro}}
-
-This is sample text and needs to be completely replaced before submitting your paper.
-
-\section{Methodology}
-
-This work aims to reproduce the work first presented in [trabalho do isco].
-
-Data was provided bt DGRM. It spans the years of 2005 to 2020. Like the reference work, landings and effort from the polyvalent and bottom trawl fleets were included since no significant differences between their catch and effort relationship were observed. In this fashion, captures from near shore and coast fisheries were accounted for.
-
-Due to the defesation, september of 2016 had catch 0, which caused a failure in the numerical methods of the optimization process. An arbitrary 0.01 kg were added to the catch of octopus in this month.
-
-
-
-
-
-\section{References}
-
-References within your paper should use the Harvard referencing format. This is sample text and needs to be completely replaced before submitting your paper. 
-
-\subsection{Secondary Subhead}
+```
 
 
-This is sample text and needs to be completely replaced before submitting your paper.   
+```{r}
+data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct') %>%
+             factor(levels =  c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct'),
+                    ordered = T) %>%  rep(., each = 15),
+           estimate = c(fit_null$fit$Model$spg$bt.par[grepl('P', names(fit_null$fit$Model$spg$bt.par))],
+                      rep_1$spg$bt.par[grepl('logRt', names(rep_1$spg$bt.par))] %>% unlist() ,
+                      rep_kt$spg$bt.par[grepl('logRt', names(rep_kt$spg$bt.par))] %>% unlist(),
+                      rep_at$spg$bt.par[grepl('logRt', names(rep_at$spg$bt.par))] %>% unlist(),
+                      rep_bt$spg$bt.par[grepl('logRt', names(rep_bt$spg$bt.par))] %>% unlist(),
+                     rep_rf$spg$bt.par[grepl('logRt', names(rep_rf$spg$bt.par))] %>% unlist(),
+                     rep_nf$spg$bt.par[grepl('logRt', names(rep_nf$spg$bt.par))]%>% unlist()) %>% unlist(),
+           dev = c(fit_null$fit$Model$spg$bt.stdev[grepl('P', names(fit_null$fit$Model$spg$bt.stdev))],
+                      rep_1$spg$bt.stdev[grepl('logRt', names(rep_1$spg$bt.stdev)) %>% unlist()],
+                      rep_kt$spg$bt.stdev[grepl('logRt', names(rep_kt$spg$bt.stdev)) %>% unlist()],
+                      rep_at$spg$bt.stdev[grepl('logRt', names(rep_at$spg$bt.stdev)) %>% unlist()],
+                      rep_bt$spg$bt.stdev[grepl('logRt', names(rep_bt$spg$bt.stdev)) %>% unlist()],
+                      rep_rf$spg$bt.stdev[grepl('logRt', names(rep_rf$spg$bt.stdev)) %>% unlist()],
+                      rep_nf$spg$bt.stdev[grepl('logRt', names(rep_nf$spg$bt.stdev))%>% unlist()]) %>% unlist()) %>% 
+  mutate(dev = ifelse(is.na(dev), 0, dev),
+         year = rep(2006:2020, times = 7)) %>% 
+  # filter(models == 'beta(t)') %>% 
+  ggplot() + 
+  geom_line(aes(x = year,
+               y = estimate,
+            group = models,
+            color = models),
+            size = 1) + 
+    geom_ribbon(aes(x = year,
+                    ymin =  estimate - 2* dev,
+               ymax = estimate + 2* dev,
+            group = models,
+            fill = models), alpha = 0.4, outline.type = 'both') + 
+  scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(7)) +
+  scale_fill_manual(values = colorRampPalette(wes_palette('Zissou1'))(7)) + 
+  facet_wrap(.~models, ncol = 4) +
+  theme_bw() + 
+  labs(title = 'Recruitment', x = '') + 
+  theme(legend.position = 'none') 
 
-\section{Another Primary Subhead}
+```
 
-\subsection{Secondary Subhead}
 
-This is sample text and needs to be completely replaced before submitting your paper. 
+```{r}
+obj_bt$report()$nstep
 
-\subsubsection{Tertiary Subhead}
+data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct') %>% 
+             factor(levels =  c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct'),
+                    ordered = T) %>%  rep(., each = 180),
+           estimate = c(annual_biomass$N.thou,
+                    obj_bt$report()$nstep ,
+                    obj_bt$report()$nstep %>% unlist(),
+                    obj_bt$report()$nstep %>% unlist(),
+                    obj_bt$report()$nstep %>% unlist(),
+                    obj_bt$report()$nstep %>% unlist(),
+                    obj_bt$report()$nstep %>% unlist()) %>%
+             unlist()) %>% 
+    mutate(month = rep(1:180, times = 7)) %>% 
+    ggplot() + 
+  geom_line(aes(x = month,
+               y = estimate,
+            group = models,
+            color = models),
+            size = 1) +
+   scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(7)) +
+  facet_wrap(.~models, ncol = 4) +
+  theme_bw() + 
+  labs(title = 'Biomass', x = '') + 
+  theme(legend.position = 'none') 
 
-This is sample text and needs to be completely replaced before submitting your paper. 
 
-\begin{table}
-\caption{Genotypes and Their Genotypic Values for a Diallelic Locus Genotypes and Their Genotypic Values for a Diallelic Locus Genotypes and Their Genotypic Values for a Diallelic Locus Genotypes and Their Genotypic Values for a Diallelic Locus Genotypes and Their Genotypic Values for a Diallelic Locus }
-\begin{center}
-\begin{tabular}{ccccc}
-\hline
-\hline
-\\[-5pt]
-\multicolumn{2}{c}{Genotype} & &
-\multicolumn{1}{c}{Dummy for additivity} &
-\multicolumn{1}{c}{Dummy for dominance }\\
-\multicolumn{1}{c}{Label} &    
-\multicolumn{1}{c}{Index i} &
-\multicolumn{1}{c}{Genotypic value ($\eta$)}&
-\multicolumn{1}{c}{effect $\alpha$ (x)} &
-\multicolumn{1}{c}{effect $\delta$ (z)}\\
-\hline
-qq      &1&     $\mu + \mbox{2}\alpha$  & 2&    0\\
-Qq&     2&      $\mu + \alpha + \delta$&        1       &1\\
-QQ&     3&      $\mu$&  0&      0\\
-\hline
-\end{tabular}
-\end{center}
-\end{table}
+```
 
-This is sample text and needs to be completely replaced before submitting your paper. 
+```{r}
+puta = 
+data.frame(
+  models = c(rep('Catdyn', 400), rep('base',400), rep('k(t)',1225), rep('alpha(t)',1156), 
+             rep('beta(t)',1156), rep('gamma',441), rep('Ct',361)) %>% c() %>% 
+             factor(levels =  c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct'),
+                    ordered = T),
+           estimate = c(fit_null$fit$Model$spg$Cor %>% c(),
+                      rep_1$spg$Cor %>% c(),
+                      rep_kt$spg$Cor %>% c(),
+                      rep_at$spg$Cor %>% c(),
+                      rep_bt$spg$Cor %>% c(),
+                     rep_rf$spg$Cor %>% c(),
+                     rep_nf$spg$Cor %>% c())) %>% 
+  mutate(estimate = pmin(pmax(estimate, -1), 1))
 
-\begin{figure}[t]
-\centering\includegraphics[scale=.75]{fig1.JPG}
-\caption{Place figure caption here.}
-\end{figure}
 
-This is sample text and needs to be completely replaced before submitting your paper. 
+hist (puta$estimate)
+
+puta %>% 
+  # filter(models == 'beta(t)') %>% 
+  ggplot() + 
+    geom_histogram(aes(x = estimate), bins = 10, fill = 'gray',col = 'black', boundary = 1.00) + 
+  facet_wrap(.~models, ncol = 4, scales = 'free_y') +
+  theme_bw() + 
+  labs(title = 'Coefficients Correlation', x = '') + 
+  theme(legend.position = 'none')
+```
+
+
+```{r}
+results = fit_null$pred$Model$Results %>% 
+  as.data.frame() %>% 
+  mutate(x = 1:180)
+
+natural_mortality = fit_null$fit$Model$spg$bt.par$M
+natural_mortality_sd = fit_null$fit$Model$spg$bt.stdev[['M']]
+
+f_m = results$`Observed.F.1/month`/(results$`Observed.F.1/month` + natural_mortality)
+
+f_m_p = results$`Predicted.F.1/month`/(results$`Predicted.F.1/month` + natural_mortality)
+
+obj$report()$predcat
+
+data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct') %>% 
+             factor(levels =  c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 'Ct'),
+                    ordered = T) %>%  rep(., each = 180),
+           M = c(exp(spg1$logM), exp(spg1_kt$logM), exp(spg1_at$logM),
+                 exp(spg1_bt$logM), exp(spg1_rf$logM),exp(spg1_nf$logM))) %>% 
+  mutate(
+           estimate =c(results$`Observed.F.1/month`,
+                    getFfromCatch(obj$report()$predcat,
+                                  obj$report()$nstep,
+                                  M),
+             getFfromCatch(obj_kt$report()$predcat,
+                                  obj_kt$report()$nstep,
+                                  M),
+             getFfromCatch(obj_at$report()$predcat,
+                                  obj_at$report()$nstep,
+                                  M),
+             getFfromCatch(obj_bt$report()$predcat,
+                                  obj_bt$report()$nstep,
+                                  M),
+             getFfromCatch(obj_rf$report()$predcat,
+                                  obj_rf$report()$nstep,
+                                  M),
+             getFfromCatch(obj_nf$report()$predcat,
+                                  obj_nf$report()$nstep,
+                                  M))) %>%  
+  mutate(Exploitation = estimate/(estimate +M )) %>% 
+  mutate(month = rep(1:180, times = 7)) %>% 
+    ggplot() + 
+  geom_line(aes(x = month,
+               y = Exploitation,
+            group = models,
+            color = models),
+            size = 1) +
+   scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(7)) +
+  facet_wrap(.~models, ncol = 4) +
+  theme_bw() + 
+  labs(title = 'Observed F', x = '') + 
+  theme(legend.position = 'none') 
+
+getFfromCatch(results$Observed.Catch.thou, annual_biomass$N.thou, fit_null$fit$Model$spg$bt.par$M)
+  
+  
+```
+
+
