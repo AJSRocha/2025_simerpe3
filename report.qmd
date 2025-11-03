@@ -927,7 +927,7 @@ ggplot() +
 #| results: hide
 #| warning: false
 #| echo: false
-#| eval: false
+#| eval: true
 
 nmult = 1e3
 dat = list()
@@ -1071,7 +1071,7 @@ plsd_kt = as.list(sdr_kt,"Std")
 
 ```{r}
 #| echo: false
-#| eval: false
+#| eval: true
 
 # results from RTMB catch prediction 
 
@@ -1090,7 +1090,7 @@ ggplot() +
 #| results: hide
 #| warning: false
 #| echo: false
-#| eval: false
+#| eval: true
 
 nmult = 1e3
 dat = list()
@@ -1227,7 +1227,7 @@ plsd_at = as.list(sdr_at,"Std")
 
 ```{r}
 #| echo: false
-#| eval: false
+#| eval: true
 
 # results from RTMB catch prediction 
 
@@ -1248,7 +1248,7 @@ ggplot() +
 #| results: hide
 #| warning: false
 #| echo: false
-#| eval: false
+#| eval: true
 
 nmult = 1e3
 dat = list()
@@ -1380,7 +1380,7 @@ plsd_bt = as.list(sdr_bt,"Std")
 
 ```{r}
 #| echo: false
-#| eval: false
+#| eval: true
 
 # results from RTMB catch prediction 
 
@@ -1401,7 +1401,7 @@ ggplot() +
 #| results: hide
 #| warning: false
 #| echo: false
-#| eval: false
+#| eval: true
 
 rain = 
 chuva %>% group_by(year) %>% 
@@ -1525,7 +1525,7 @@ plsd_rf = as.list(sdr_rf,"Std")
 
 ```{r}
 #| echo: false
-#| eval: false
+#| eval: true
 
 # results from RTMB catch prediction 
 
@@ -1544,7 +1544,7 @@ ggplot() +
 #| results: hide
 #| warning: false
 #| echo: false
-#| eval: false
+#| eval: true
 
 
 nmult = 1e3
@@ -1669,7 +1669,7 @@ plsd_nf = as.list(sdr_nf,"Std")
 
 ```{r}
 #| echo: false
-#| eval: false
+#| eval: true
 
 # results from RTMB catch prediction 
 
@@ -1721,7 +1721,7 @@ ggplot() +
 
 data_frame(year = 2006:2020,
            Kt = obj_kt$report()$Kt,
-           at = obj_at$report()$alph,
+           at = obj_at$report()$alpha,
            bt = obj_bt$report()$beta) %>% 
   pivot_longer(cols = -c(year)) %>% 
   ggplot() + 
@@ -2062,20 +2062,20 @@ data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 
   # filter(models == 'beta(t)') %>% 
   ggplot() + 
   geom_line(aes(x = year,
-               y = estimate,
+               y = estimate/1000,
             group = models,
             color = models),
             size = 1) + 
     geom_ribbon(aes(x = year,
-                    ymin =  estimate - 2* dev,
-               ymax = estimate + 2* dev,
+                    ymin =  (estimate - 2* dev)/1000,
+               ymax = (estimate + 2* dev)/1000,
             group = models,
             fill = models), alpha = 0.4, outline.type = 'both') + 
   scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(7)) +
   scale_fill_manual(values = colorRampPalette(wes_palette('Zissou1'))(7)) + 
-  facet_wrap(.~models, ncol = 4) +
+  facet_wrap(.~models, ncol = 3) +
   theme_bw() + 
-  labs(title = 'Recruitment', x = '') + 
+  labs(title = 'Recruitment (thou. ind.)', x = '', y = '') + 
   theme(legend.position = 'none') 
 
 ```
@@ -2098,14 +2098,14 @@ data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 
     mutate(month = rep(1:180, times = 7)) %>% 
     ggplot() + 
   geom_line(aes(x = month,
-               y = estimate,
+               y = estimate/1000,
             group = models,
             color = models),
             size = 1) +
    scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(7)) +
-  facet_wrap(.~models, ncol = 4) +
+  facet_wrap(.~models, ncol = 3, dir = "lt") +
   theme_bw() + 
-  labs(title = 'Biomass', x = '') + 
+  labs(title = 'Biomass (mill. ind)', x = '', y = '') + 
   theme(legend.position = 'none') 
 
 
@@ -2189,9 +2189,9 @@ data.frame(models = c('Catdyn', 'base', 'k(t)', 'alpha(t)', 'beta(t)', 'gamma', 
             color = models),
             size = 1) +
    scale_color_manual(values = colorRampPalette(wes_palette('Zissou1'))(7)) +
-  facet_wrap(.~models, ncol = 4) +
+  facet_wrap(.~models, ncol = 3) +
   theme_bw() + 
-  labs(title = 'Observed F', x = '') + 
+  labs(title = 'Observed exploitation rate', x = '', y= '') + 
   theme(legend.position = 'none') 
 
 getFfromCatch(results$Observed.Catch.thou, annual_biomass$N.thou, fit_null$fit$Model$spg$bt.par$M)
